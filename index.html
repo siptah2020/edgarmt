@@ -1430,9 +1430,8 @@ function ShootoutGame({ opponent, onMatchEnd }) {
   return (
     <canvas ref={canvasRef} width={W} height={H}
       onMouseMove={handleMouseMove} onClick={handleClick}
-      style={{ width: "100%", maxWidth: 800, height: "auto", aspectRatio: "800/600",
-        display: "block", margin: "0 auto", cursor: "crosshair",
-        borderRadius: 10, boxShadow: "0 0 60px rgba(37,99,235,0.25), 0 0 120px rgba(37,99,235,0.1)" }}
+      style={{ width: "100vw", height: "100vh",
+        display: "block", cursor: "crosshair" }}
     />
   );
 }
@@ -1444,11 +1443,11 @@ function TitleScreen({ onStart }) {
   useEffect(() => { let id, v = 0; const f = () => { v += 0.016; setT(v); id = requestAnimationFrame(f); }; id = requestAnimationFrame(f); return () => cancelAnimationFrame(id); }, []);
   return (
     <div onClick={() => { sfx.init(); onStart(); }} style={{
-      width: "100%", maxWidth: 800, margin: "0 auto", aspectRatio: "800/600",
+      width: "100vw", height: "100vh",
       background: "linear-gradient(135deg, #020210 0%, #0a1040 40%, #150a30 100%)",
-      borderRadius: 10, display: "flex", flexDirection: "column", alignItems: "center",
+      display: "flex", flexDirection: "column", alignItems: "center",
       justifyContent: "center", cursor: "pointer", position: "relative", overflow: "hidden",
-      boxShadow: "0 0 60px rgba(37,99,235,0.25)", fontFamily: "'Segoe UI', Arial, sans-serif",
+      fontFamily: "'Segoe UI', Arial, sans-serif",
     }}>
       {/* Animated gradient orb */}
       <div style={{ position: "absolute", width: 400, height: 400, borderRadius: "50%",
@@ -1509,11 +1508,11 @@ function PlayerCard({ player, teamColors, isKeeper, isCoach, isMascot }) {
 
 function TeamScreen({ onContinue }) {
   return (
-    <div style={{ width: "100%", maxWidth: 800, margin: "0 auto", aspectRatio: "800/600",
+    <div style={{ width: "100vw", height: "100vh",
       background: "linear-gradient(180deg, #020210 0%, #0a1040 100%)",
-      borderRadius: 10, display: "flex", flexDirection: "column", alignItems: "center",
+      display: "flex", flexDirection: "column", alignItems: "center",
       padding: "28px 20px", boxSizing: "border-box", overflow: "auto",
-      boxShadow: "0 0 60px rgba(37,99,235,0.25)", fontFamily: "'Segoe UI', Arial, sans-serif", }}>
+      fontFamily: "'Segoe UI', Arial, sans-serif", }}>
       <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", letterSpacing: 5, textTransform: "uppercase" }}>Dit hold</div>
       <h2 style={{ fontSize: 30, fontWeight: 900, color: "#fff", margin: "4px 0 2px" }}>FC Kongehuset</h2>
       <div style={{ width: 80, height: 2, background: "linear-gradient(90deg, transparent, #2563eb, transparent)", margin: "8px 0 22px" }} />
@@ -1534,11 +1533,11 @@ function TeamScreen({ onContinue }) {
 
 function BracketScreen({ results, currentMatch, onStartMatch }) {
   return (
-    <div style={{ width: "100%", maxWidth: 800, margin: "0 auto", aspectRatio: "800/600",
+    <div style={{ width: "100vw", height: "100vh",
       background: "linear-gradient(180deg, #020210 0%, #0a1040 100%)",
-      borderRadius: 10, display: "flex", flexDirection: "column", alignItems: "center",
+      display: "flex", flexDirection: "column", alignItems: "center",
       justifyContent: "center", padding: 24, boxSizing: "border-box",
-      boxShadow: "0 0 60px rgba(37,99,235,0.25)", fontFamily: "'Segoe UI', Arial, sans-serif", }}>
+      fontFamily: "'Segoe UI', Arial, sans-serif", }}>
       <h2 style={{ fontSize: 26, fontWeight: 900, color: "#fff", margin: "0 0 4px", letterSpacing: 2 }}>TURNERING</h2>
       <div style={{ width: 60, height: 2, background: "linear-gradient(90deg, transparent, #2563eb, transparent)", margin: "0 0 36px" }} />
       <div style={{ display: "flex", flexDirection: "column", gap: 18, width: "100%", maxWidth: 480 }}>
@@ -1571,11 +1570,11 @@ function VictoryScreen({ onRestart }) {
   const [t, setT] = useState(0);
   useEffect(() => { sfx.init(); sfx.cheer(); let id, v = 0; const f = () => { v += 0.016; setT(v); id = requestAnimationFrame(f); }; id = requestAnimationFrame(f); return () => cancelAnimationFrame(id); }, []);
   return (
-    <div style={{ width: "100%", maxWidth: 800, margin: "0 auto", aspectRatio: "800/600",
+    <div style={{ width: "100vw", height: "100vh",
       background: "linear-gradient(180deg, #020210 0%, #150820 50%, #0a1040 100%)",
-      borderRadius: 10, display: "flex", flexDirection: "column", alignItems: "center",
+      display: "flex", flexDirection: "column", alignItems: "center",
       justifyContent: "center", position: "relative", overflow: "hidden",
-      boxShadow: "0 0 80px rgba(250,204,21,0.2)", fontFamily: "'Segoe UI', Arial, sans-serif", }}>
+      fontFamily: "'Segoe UI', Arial, sans-serif", }}>
       {[...Array(35)].map((_, i) => (
         <div key={i} style={{ position: "absolute", left: `${(i * 29 + 5) % 100}%`,
           top: `${((t * 35 + i * 67) % 130) - 15}%`,
@@ -1604,10 +1603,10 @@ function VictoryScreen({ onRestart }) {
 
 function DefeatScreen({ opponentName, onRetry }) {
   return (
-    <div style={{ width: "100%", maxWidth: 800, margin: "0 auto", aspectRatio: "800/600",
+    <div style={{ width: "100vw", height: "100vh",
       background: "linear-gradient(180deg, #020210 0%, #200808 100%)",
-      borderRadius: 10, display: "flex", flexDirection: "column", alignItems: "center",
-      justifyContent: "center", boxShadow: "0 0 60px rgba(239,68,68,0.15)", fontFamily: "'Segoe UI', Arial, sans-serif", }}>
+      display: "flex", flexDirection: "column", alignItems: "center",
+      justifyContent: "center", fontFamily: "'Segoe UI', Arial, sans-serif", }}>
       <div style={{ fontSize: 52, marginBottom: 16 }}>😔</div>
       <h2 style={{ fontSize: 30, fontWeight: 900, color: "#ef4444", margin: "0 0 12px" }}>NEDERLAG</h2>
       <div style={{ fontSize: 15, color: "rgba(255,255,255,0.5)", marginBottom: 36 }}>{opponentName} vandt denne gang...</div>
@@ -1657,11 +1656,11 @@ function DesignPlayerScreen({ onDone }) {
   const subSkill = (id) => { if (skills[id] > 0) setSkills(s => ({ ...s, [id]: s[id] - 1 })); };
 
   return (
-    <div style={{ width: "100%", maxWidth: 800, margin: "0 auto", aspectRatio: "800/600",
+    <div style={{ width: "100vw", height: "100vh",
       background: "linear-gradient(180deg, #020210 0%, #0a1040 100%)",
-      borderRadius: 10, display: "flex", flexDirection: "column",
+      display: "flex", flexDirection: "column",
       padding: "20px 24px", boxSizing: "border-box", overflow: "auto",
-      boxShadow: "0 0 60px rgba(37,99,235,0.25)", fontFamily: "'Segoe UI', Arial, sans-serif", color: "#fff" }}>
+      fontFamily: "'Segoe UI', Arial, sans-serif", color: "#fff" }}>
 
       <div style={{ textAlign: "center", marginBottom: 16 }}>
         <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", letterSpacing: 5, textTransform: "uppercase" }}>Edgar</div>
@@ -1870,11 +1869,11 @@ function SetTeamScreen({ playerConfig, onDone }) {
   };
 
   return (
-    <div style={{ width: "100%", maxWidth: 800, margin: "0 auto", aspectRatio: "800/600",
+    <div style={{ width: "100vw", height: "100vh",
       background: "linear-gradient(180deg, #020210 0%, #0a1040 100%)",
-      borderRadius: 10, display: "flex", flexDirection: "column",
+      display: "flex", flexDirection: "column",
       padding: "20px 24px", boxSizing: "border-box", overflow: "auto",
-      boxShadow: "0 0 60px rgba(37,99,235,0.25)", fontFamily: "'Segoe UI', Arial, sans-serif", color: "#fff" }}>
+      fontFamily: "'Segoe UI', Arial, sans-serif", color: "#fff" }}>
 
       <div style={{ textAlign: "center", marginBottom: 12 }}>
         <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", letterSpacing: 5, textTransform: "uppercase" }}>FC Kongehuset</div>
@@ -2042,7 +2041,7 @@ function EdgarsFodboldudfordring() {
   }, []);
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#020208", padding: 16 }}>
+    <div style={{ width: "100vw", height: "100vh", background: "#020208", overflow: "hidden" }}>
       {screen === "title" && <TitleScreen onStart={() => setScreen("designPlayer")} />}
       {screen === "designPlayer" && <DesignPlayerScreen onDone={handleDesignDone} />}
       {screen === "setTeam" && <SetTeamScreen playerConfig={playerConfig} onDone={handleTeamDone} />}
