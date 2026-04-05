@@ -1,0 +1,2059 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Edgars Fodboldudfordring</title>
+    <style>
+        body {
+            background: #020208;
+            margin: 0;
+            overflow: hidden;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+/* =============================================================
+   EDGARS FODBOLDUDFORDRING - Tillykke med 12-års fødselsdagen!
+   A penalty shootout tournament — cinematic edition
+   ============================================================= */
+
+const W = 800, H = 600;
+
+// ======================== DATA ========================
+
+const TEAM = { name: "FC Kongehuset", short: "KON", colors: ["#2563eb", "#ffffff"], keeperColors: ["#22c55e", "#000000"] };
+const OPPONENTS = [
+  { name: "Brøndby IF", short: "BIF", colors: ["#facc15", "#1e3a5f"], keeperColors: ["#ef4444", "#000000"], difficulty: 0.28, label: "Kvartfinale" },
+  { name: "FC København", short: "FCK", colors: ["#ffffff", "#111111"], keeperColors: ["#f59e0b", "#000000"], difficulty: 0.45, label: "Semifinale" },
+  { name: "Danmarks Landshold", short: "DAN", colors: ["#c8102e", "#ffffff"], keeperColors: ["#111111", "#facc15"], difficulty: 0.62, label: "Finale" },
+];
+const PLAYERS = [
+  { name: "Edgar", role: "Kaptajn", num: 10, hair: "#b8943a", hairStyle: "curly" },
+  { name: "Herbert", role: "Angriber", num: 7, hair: "#5c3317", hairStyle: "short" },
+  { name: "Bernhard", role: "Midtbane", num: 8, hair: "#daa520", hairStyle: "straight" },
+  { name: "Thomas", role: "Forsvar", num: 4, hair: "#5c3317", hairStyle: "short" },
+  { name: "Benjamin", role: "Midtbane", num: 6, hair: "#5c3317", hairStyle: "short" },
+  { name: "Sosha", role: "Angriber", num: 9, hair: "#5c3317", hairStyle: "long" },
+  { name: "Joshua", role: "Målmand", num: 1, hair: "#5c3317", hairStyle: "short" },
+];
+const COACH = { name: "Ela", role: "Træner", hair: "#aaa", hairStyle: "short" };
+const SHOOT_ORDER = [0, 1, 2, 3, 4];
+
+const GOAL = { leftBottom: [232, 380], leftTop: [252, 192], rightBottom: [568, 380], rightTop: [548, 192], crossbarY: 192 };
+const AIM_BOUNDS = { left: 260, right: 540, top: 200, bottom: 370 };
+const PENALTY_SPOT = { x: 400, y: 530 };
+const KEEPER_CENTER = { x: 400, y: 325 };
+
+// ======================== MATH ========================
+
+const easeOutCubic = t => 1 - (1 - t) ** 3;
+const easeOutQuad = t => t * (2 - t);
+const easeInOutCubic = t => t < .5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const rand = (lo, hi) => lo + Math.random() * (hi - lo);
+const quadBez = (a, b, c, t) => { const m = 1 - t; return m * m * a + 2 * m * t * b + t * t * c; };
+
+function hexToRgb(hex) {
+  hex = hex.replace('#', '');
+  if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+  const r = parseInt(hex.slice(0, 2), 16), g = parseInt(hex.slice(2, 4), 16), b = parseInt(hex.slice(4, 6), 16);
+  return [isNaN(r)?0:r, isNaN(g)?0:g, isNaN(b)?0:b];
+}
+function shadeColor(hex, pct) {
+  let [r, g, b] = hexToRgb(hex);
+  r = clamp(Math.round(r * (1 + pct / 100)), 0, 255);
+  g = clamp(Math.round(g * (1 + pct / 100)), 0, 255);
+  b = clamp(Math.round(b * (1 + pct / 100)), 0, 255);
+  return `rgb(${r},${g},${b})`;
+}
+
+// ======================== SOUND ENGINE ========================
+
+class SoundFX {
+  constructor() { this.ctx = null; }
+  init() { if (!this.ctx) try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+  _noise(dur) { if (!this.ctx) return null; const n = this.ctx.sampleRate * dur; const b = this.ctx.createBuffer(1, n, this.ctx.sampleRate); const d = b.getChannelData(0); for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1; return b; }
+  kick() { if (!this.ctx) return; const n = this.ctx.currentTime; const o = this.ctx.createOscillator(), g = this.ctx.createGain(); o.type = "sine"; o.frequency.setValueAtTime(150, n); o.frequency.exponentialRampToValueAtTime(40, n + .12); g.gain.setValueAtTime(.5, n); g.gain.exponentialRampToValueAtTime(.001, n + .15); o.connect(g).connect(this.ctx.destination); o.start(n); o.stop(n + .15); const s = this.ctx.createBufferSource(); s.buffer = this._noise(.06); const ng = this.ctx.createGain(); ng.gain.setValueAtTime(.25, n); ng.gain.exponentialRampToValueAtTime(.001, n + .06); s.connect(ng).connect(this.ctx.destination); s.start(n); }
+  whistle() { if (!this.ctx) return; const n = this.ctx.currentTime; const o = this.ctx.createOscillator(), g = this.ctx.createGain(); o.type = "sine"; o.frequency.setValueAtTime(800, n); o.frequency.linearRampToValueAtTime(1200, n + .15); o.frequency.linearRampToValueAtTime(900, n + .3); o.frequency.linearRampToValueAtTime(1200, n + .5); g.gain.setValueAtTime(.15, n); g.gain.setValueAtTime(.15, n + .45); g.gain.exponentialRampToValueAtTime(.001, n + .55); o.connect(g).connect(this.ctx.destination); o.start(n); o.stop(n + .55); }
+  cheer() { if (!this.ctx) return; const n = this.ctx.currentTime; const s = this.ctx.createBufferSource(); s.buffer = this._noise(1.8); const f = this.ctx.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = 1200; f.Q.value = .4; const g = this.ctx.createGain(); g.gain.setValueAtTime(.001, n); g.gain.linearRampToValueAtTime(.22, n + .15); g.gain.setValueAtTime(.22, n + 1); g.gain.exponentialRampToValueAtTime(.001, n + 1.8); s.connect(f).connect(g).connect(this.ctx.destination); s.start(n); }
+  groan() { if (!this.ctx) return; const n = this.ctx.currentTime; const s = this.ctx.createBufferSource(); s.buffer = this._noise(1.2); const f = this.ctx.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = 350; f.Q.value = .8; const g = this.ctx.createGain(); g.gain.setValueAtTime(.15, n); g.gain.exponentialRampToValueAtTime(.001, n + 1.2); s.connect(f).connect(g).connect(this.ctx.destination); s.start(n); }
+  save() { if (!this.ctx) return; const n = this.ctx.currentTime; const o = this.ctx.createOscillator(), g = this.ctx.createGain(); o.type = "sine"; o.frequency.setValueAtTime(100, n); o.frequency.exponentialRampToValueAtTime(35, n + .15); g.gain.setValueAtTime(.45, n); g.gain.exponentialRampToValueAtTime(.001, n + .18); o.connect(g).connect(this.ctx.destination); o.start(n); o.stop(n + .18); }
+  net() { if (!this.ctx) return; const n = this.ctx.currentTime; const s = this.ctx.createBufferSource(); s.buffer = this._noise(.25); const f = this.ctx.createBiquadFilter(); f.type = "highpass"; f.frequency.value = 2500; const g = this.ctx.createGain(); g.gain.setValueAtTime(.2, n); g.gain.exponentialRampToValueAtTime(.001, n + .2); s.connect(f).connect(g).connect(this.ctx.destination); s.start(n); }
+  post() { if (!this.ctx) return; const n = this.ctx.currentTime; const o = this.ctx.createOscillator(), g = this.ctx.createGain(); o.type = "triangle"; o.frequency.setValueAtTime(2200, n); o.frequency.exponentialRampToValueAtTime(600, n + .4); g.gain.setValueAtTime(.25, n); g.gain.exponentialRampToValueAtTime(.001, n + .45); o.connect(g).connect(this.ctx.destination); o.start(n); o.stop(n + .45); }
+}
+const sfx = new SoundFX();
+
+// ======================== PRE-GENERATED CROWD ========================
+
+function generateCrowd() {
+  const rows = [];
+  const colors = ["#2563eb", "#3b82f6", "#60a5fa", "#93c5fd", "#fff", "#dbeafe", "#1d4ed8"];
+  // Back stand - multiple rows of heads
+  for (let row = 0; row < 7; row++) {
+    for (let i = 0; i < 45; i++) {
+      const spacing = 424 / 45;
+      const x = 190 + i * spacing + rand(-3, 3);
+      const y = 56 + row * 12 + rand(-2, 2);
+      const phase = rand(0, Math.PI * 2);
+      const c = colors[Math.floor(Math.random() * colors.length)];
+      const skin = Math.random() > 0.5;
+      rows.push({ x, y, phase, c, skin, section: "back", size: 3 + rand(0, 1.5) });
+    }
+  }
+  // Side stands
+  for (let side = 0; side < 2; side++) {
+    for (let row = 0; row < 12; row++) {
+      for (let i = 0; i < 8; i++) {
+        const baseX = side === 0 ? 10 : 625;
+        const x = baseX + i * 21 + rand(-3, 3);
+        const y = 90 + row * 23 + rand(-3, 3);
+        const phase = rand(0, Math.PI * 2);
+        const c = colors[Math.floor(Math.random() * colors.length)];
+        rows.push({ x, y, phase, c, skin: Math.random() > 0.5, section: side === 0 ? "left" : "right", size: 2.5 + rand(0, 1) });
+      }
+    }
+  }
+  return rows;
+}
+
+function generateStars() {
+  const stars = [];
+  for (let i = 0; i < 60; i++) {
+    stars.push({ x: rand(0, W), y: rand(0, 120), size: rand(0.5, 2), twinklePhase: rand(0, Math.PI * 2), twinkleSpeed: rand(1, 3) });
+  }
+  return stars;
+}
+
+function generateGrassBlades() {
+  const blades = [];
+  for (let i = 0; i < 120; i++) {
+    const x = rand(50, W - 50);
+    const y = rand(460, H - 5);
+    blades.push({ x, y, height: rand(4, 10), sway: rand(0, Math.PI * 2), lean: rand(-0.2, 0.2) });
+  }
+  return blades;
+}
+
+// ======================== DRAWING: STADIUM & PITCH ========================
+
+function drawSky(ctx, time) {
+  const g = ctx.createLinearGradient(0, 0, 0, 200);
+  g.addColorStop(0, "#020210");
+  g.addColorStop(0.5, "#080828");
+  g.addColorStop(1, "#101045");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, 200);
+}
+
+function drawStars(ctx, stars, time) {
+  for (const s of stars) {
+    const alpha = 0.3 + 0.5 * Math.sin(time * s.twinkleSpeed + s.twinklePhase);
+    ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+function drawStadiumStructure(ctx) {
+  // Main structures with gradient for depth
+  const wallGrad = ctx.createLinearGradient(0, 50, 0, 380);
+  wallGrad.addColorStop(0, "#08081e");
+  wallGrad.addColorStop(1, "#0c0c28");
+  ctx.fillStyle = wallGrad;
+  // Left stand
+  ctx.beginPath(); ctx.moveTo(0, 380); ctx.lineTo(0, 70); ctx.lineTo(185, 135); ctx.lineTo(185, 380); ctx.fill();
+  // Right stand
+  ctx.beginPath(); ctx.moveTo(W, 380); ctx.lineTo(W, 70); ctx.lineTo(615, 135); ctx.lineTo(615, 380); ctx.fill();
+  // Back stand
+  ctx.beginPath(); ctx.moveTo(185, 135); ctx.lineTo(185, 44); ctx.lineTo(615, 44); ctx.lineTo(615, 135); ctx.fill();
+
+  // Stadium roof beams
+  ctx.strokeStyle = "rgba(40,40,80,0.6)"; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(0, 70); ctx.lineTo(185, 42); ctx.lineTo(615, 42); ctx.lineTo(W, 70); ctx.stroke();
+  // Vertical supports
+  for (let x = 185; x <= 615; x += 86) {
+    ctx.strokeStyle = "rgba(40,40,80,0.3)"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x, 42); ctx.lineTo(x, 44 + (x - 185) * 0.01); ctx.stroke();
+  }
+
+  // Ad boards along pitch edge
+  ctx.fillStyle = "#0a0a20";
+  ctx.fillRect(0, 365, 230, 16);
+  ctx.fillRect(570, 365, 230, 16);
+  // Ad board text
+  ctx.fillStyle = "rgba(255,255,255,0.12)"; ctx.font = "bold 8px Arial"; ctx.textAlign = "center";
+  ctx.fillText("KONGEHUSET ARENA", 115, 376);
+  ctx.fillText("FC KONGEHUSET", 685, 376);
+}
+
+function drawCrowd(ctx, crowd, time) {
+  for (const p of crowd) {
+    // Wave animation - each person bobs up slightly in sequence
+    const waveOffset = Math.sin(time * 2.5 + p.phase + p.x * 0.02) * 2.5;
+    const armWave = Math.sin(time * 3 + p.phase) > 0.7;
+    const y = p.y + waveOffset;
+
+    // Head
+    ctx.fillStyle = p.skin ? "rgba(220,190,160,0.6)" : p.c;
+    ctx.beginPath(); ctx.arc(p.x, y, p.size * 0.7, 0, Math.PI * 2); ctx.fill();
+    // Body
+    ctx.fillStyle = p.c;
+    const bAlpha = p.section === "back" ? 0.5 : 0.35;
+    ctx.globalAlpha = bAlpha;
+    ctx.fillRect(p.x - p.size * 0.5, y + p.size * 0.5, p.size, p.size * 1.5);
+    // Arm wave
+    if (armWave && Math.random() > 0.92) {
+      ctx.strokeStyle = p.c; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(p.x, y); ctx.lineTo(p.x + rand(-4, 4), y - 5); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawFloodlights(ctx, time) {
+  // Four floodlight towers at the stadium corners, angled toward the pitch center
+  const lights = [
+    { x: 45, y: 18, aimX: 300, aimY: 440 },
+    { x: 165, y: 10, aimX: 380, aimY: 400 },
+    { x: 635, y: 10, aimX: 420, aimY: 400 },
+    { x: 755, y: 18, aimX: 500, aimY: 440 },
+  ];
+  for (const l of lights) {
+    // Pole
+    ctx.strokeStyle = "#1a1a3a"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(l.x, 80); ctx.lineTo(l.x, l.y); ctx.stroke();
+    // Light housing
+    ctx.fillStyle = "#2a2a4a";
+    ctx.fillRect(l.x - 10, l.y, 20, 6);
+    // Bulbs
+    const flicker = 0.92 + Math.sin(time * 25 + l.x) * 0.04;
+    ctx.fillStyle = `rgba(255,255,220,${0.9 * flicker})`;
+    for (let i = -1; i <= 1; i++) {
+      ctx.beginPath(); ctx.arc(l.x + i * 5, l.y + 3, 2, 0, Math.PI * 2); ctx.fill();
+    }
+    // Radial glow around fixture
+    const glow = ctx.createRadialGradient(l.x, l.y + 3, 2, l.x, l.y + 3, 120);
+    glow.addColorStop(0, `rgba(255,255,200,${0.14 * flicker})`);
+    glow.addColorStop(0.4, `rgba(255,255,180,${0.04 * flicker})`);
+    glow.addColorStop(1, "rgba(255,255,180,0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(l.x, l.y + 3, 120, 0, Math.PI * 2); ctx.fill();
+    // Volumetric light cone aimed at pitch (not behind goal)
+    ctx.fillStyle = `rgba(255,255,210,${0.015 * flicker})`;
+    ctx.beginPath();
+    ctx.moveTo(l.x - 8, l.y + 6);
+    ctx.lineTo(l.aimX - 100, l.aimY);
+    ctx.lineTo(l.aimX + 100, l.aimY);
+    ctx.lineTo(l.x + 8, l.y + 6);
+    ctx.closePath();
+    ctx.fill();
+  }
+  // General pitch illumination — warm wash across the playing area
+  const pitchLight = ctx.createRadialGradient(400, 420, 50, 400, 420, 350);
+  pitchLight.addColorStop(0, "rgba(255,255,230,0.04)");
+  pitchLight.addColorStop(1, "rgba(255,255,230,0)");
+  ctx.fillStyle = pitchLight;
+  ctx.fillRect(100, 200, 600, 380);
+}
+
+function drawPitch(ctx, time) {
+  // Main pitch gradient
+  const pg = ctx.createLinearGradient(0, 340, 0, H);
+  pg.addColorStop(0, "#176834");
+  pg.addColorStop(0.3, "#1d7a3e");
+  pg.addColorStop(1, "#25924a");
+  ctx.fillStyle = pg;
+  ctx.fillRect(0, 345, W, 255);
+
+  // Mow stripes (perspective: narrower at top)
+  for (let i = 0; i < 12; i++) {
+    if (i % 2 === 0) {
+      const y = 345 + i * 22;
+      const h = 22;
+      ctx.fillStyle = `rgba(255,255,255,${0.018 + i * 0.002})`;
+      ctx.fillRect(0, y, W, h);
+    }
+  }
+
+  // Pitch lines with glow
+  ctx.shadowColor = "rgba(255,255,255,0.15)"; ctx.shadowBlur = 4;
+  ctx.strokeStyle = "rgba(255,255,255,0.4)"; ctx.lineWidth = 1.5;
+  // Penalty area
+  ctx.beginPath(); ctx.moveTo(150, 510); ctx.lineTo(196, 348); ctx.lineTo(604, 348); ctx.lineTo(650, 510); ctx.closePath(); ctx.stroke();
+  // Goal area
+  ctx.beginPath(); ctx.moveTo(252, 435); ctx.lineTo(246, 368); ctx.lineTo(554, 368); ctx.lineTo(548, 435); ctx.closePath(); ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // Penalty spot with glow
+  ctx.fillStyle = "#fff";
+  ctx.shadowColor = "rgba(255,255,255,0.5)"; ctx.shadowBlur = 6;
+  ctx.beginPath(); ctx.arc(PENALTY_SPOT.x, PENALTY_SPOT.y, 3, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowBlur = 0;
+}
+
+function drawGrass(ctx, blades, time) {
+  ctx.strokeStyle = "rgba(100,220,100,0.3)"; ctx.lineWidth = 1;
+  for (const b of blades) {
+    const sway = Math.sin(time * 1.5 + b.sway) * 3 + b.lean * 5;
+    ctx.beginPath();
+    ctx.moveTo(b.x, b.y);
+    ctx.quadraticCurveTo(b.x + sway * 0.5, b.y - b.height * 0.6, b.x + sway, b.y - b.height);
+    ctx.stroke();
+  }
+}
+
+// ======================== DRAWING: GOAL ========================
+
+function drawGoalNet(ctx) {
+  const cols = 18, rows = 10;
+  // Net depth lines (going back)
+  for (let i = 0; i <= cols; i++) {
+    const t = i / cols;
+    const bx = lerp(232, 568, t), by = 380;
+    const tx = lerp(252, 548, t), ty = 192;
+    const backX = lerp(270, 530, t), backY = 172;
+    ctx.strokeStyle = `rgba(200,200,220,${0.06 + t * 0.02 * (t < 0.5 ? 1 : -1) + 0.02})`;
+    ctx.lineWidth = 0.6;
+    ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(tx, ty); ctx.lineTo(backX, backY); ctx.stroke();
+  }
+  // Horizontal net
+  for (let j = 0; j <= rows; j++) {
+    const t = j / rows;
+    const y = lerp(380, 192, t);
+    const lx = lerp(232, 252, t), rx = lerp(568, 548, t);
+    ctx.strokeStyle = `rgba(200,200,220,${0.05 + (1 - Math.abs(t - 0.5)) * 0.04})`;
+    ctx.lineWidth = 0.5;
+    ctx.beginPath(); ctx.moveTo(lx, y); ctx.lineTo(rx, y); ctx.stroke();
+    // Back horizontal
+    const blx = lerp(232, 270, t), brx = lerp(568, 530, t), bby = lerp(380, 172, t);
+    ctx.beginPath(); ctx.moveTo(blx, bby); ctx.lineTo(brx, bby); ctx.stroke();
+  }
+}
+
+function drawGoalFrame(ctx) {
+  // Post shadow (on ground)
+  ctx.fillStyle = "rgba(0,0,0,0.15)";
+  ctx.beginPath();
+  ctx.moveTo(228, 382); ctx.lineTo(220, 395); ctx.lineTo(236, 395); ctx.lineTo(240, 382);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(560, 382); ctx.lineTo(564, 395); ctx.lineTo(580, 395); ctx.lineTo(572, 382);
+  ctx.fill();
+
+  // Posts with 3D gradient effect
+  // Left post
+  const lpg = ctx.createLinearGradient(228, 0, 242, 0);
+  lpg.addColorStop(0, "#ccc"); lpg.addColorStop(0.3, "#fff"); lpg.addColorStop(0.7, "#eee"); lpg.addColorStop(1, "#aaa");
+  ctx.fillStyle = lpg;
+  ctx.beginPath();
+  ctx.moveTo(229, 380); ctx.lineTo(238, 380); ctx.lineTo(256, 192); ctx.lineTo(249, 192); ctx.closePath(); ctx.fill();
+  // Right post
+  const rpg = ctx.createLinearGradient(558, 0, 572, 0);
+  rpg.addColorStop(0, "#aaa"); rpg.addColorStop(0.3, "#eee"); rpg.addColorStop(0.7, "#fff"); rpg.addColorStop(1, "#ccc");
+  ctx.fillStyle = rpg;
+  ctx.beginPath();
+  ctx.moveTo(562, 380); ctx.lineTo(571, 380); ctx.lineTo(551, 192); ctx.lineTo(544, 192); ctx.closePath(); ctx.fill();
+  // Crossbar with 3D
+  const cbg = ctx.createLinearGradient(0, 188, 0, 198);
+  cbg.addColorStop(0, "#fff"); cbg.addColorStop(0.5, "#eee"); cbg.addColorStop(1, "#bbb");
+  ctx.fillStyle = cbg;
+  ctx.beginPath();
+  ctx.moveTo(249, 188); ctx.lineTo(551, 188); ctx.lineTo(548, 197); ctx.lineTo(252, 197); ctx.closePath(); ctx.fill();
+  // Highlight edges
+  ctx.strokeStyle = "rgba(255,255,255,0.6)"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(232, 379); ctx.lineTo(251, 191); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(568, 379); ctx.lineTo(549, 191); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(251, 189); ctx.lineTo(549, 189); ctx.stroke();
+}
+
+// ======================== DRAWING: CHARACTERS ========================
+
+function drawLimb(ctx, x1, y1, angle, len, color, width) {
+  const x2 = x1 + Math.sin(angle) * len;
+  const y2 = y1 + Math.cos(angle) * len;
+  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  return [x2, y2];
+}
+
+function drawDetailedKeeper(ctx, x, y, diveProgress, diveDir, colors, time) {
+  ctx.save();
+  ctx.translate(x, y);
+
+  // Multi-phase dive: 0-0.3 = push-off, 0.3-0.7 = airborne/stretch, 0.7-1.0 = full extension
+  const rawDp = Math.min(diveProgress, 1);
+  const isMoving = rawDp > 0.01;
+  const readyBob = isMoving ? 0 : Math.sin(time * 4) * 2;
+  const readyCrouch = isMoving ? 0 : Math.abs(Math.sin(time * 4)) * 3;
+
+  // Phase-based dive interpolation for fluid motion
+  let diveX = 0, diveY = 0, bodyRot = 0, bodyStretch = 0, legKick = 0, armReach = 0;
+  if (diveDir !== 0 && isMoving) {
+    if (rawDp < 0.3) {
+      // Push-off phase: crouch and load
+      const t = rawDp / 0.3;
+      const et = easeInOutCubic(t);
+      diveX = diveDir * et * 25;
+      diveY = et * 8; // crouch down
+      bodyRot = diveDir * et * 0.15;
+      legKick = et * 0.3;
+      armReach = et * 0.2;
+    } else if (rawDp < 0.7) {
+      // Airborne: fast lateral movement, body extends
+      const t = (rawDp - 0.3) / 0.4;
+      const et = easeOutCubic(t);
+      diveX = diveDir * (25 + et * 95);
+      diveY = -et * 28 + (et * et) * 10; // up then down arc
+      bodyRot = diveDir * (0.15 + et * 0.55);
+      bodyStretch = et * 1.0;
+      legKick = 0.3 + et * 0.7;
+      armReach = 0.2 + et * 0.8;
+    } else {
+      // Full extension: stretched out in the air
+      const t = (rawDp - 0.7) / 0.3;
+      const et = easeOutQuad(t);
+      diveX = diveDir * (120 + et * 15);
+      diveY = -18 + et * 12; // settling
+      bodyRot = diveDir * (0.7 + et * 0.1);
+      bodyStretch = 1.0;
+      legKick = 1.0;
+      armReach = 1.0;
+    }
+    ctx.translate(diveX, diveY);
+    ctx.rotate(bodyRot);
+  } else if (diveDir === 0 && isMoving) {
+    const dp = easeOutCubic(rawDp);
+    diveY = dp * 16;
+    legKick = dp * 0.5;
+    armReach = dp * 0.4;
+    ctx.translate(0, diveY);
+  }
+
+  // Ground shadow (distorts with dive)
+  ctx.fillStyle = "rgba(0,0,0,0.18)";
+  const shadowW = 20 + armReach * 25;
+  ctx.beginPath(); ctx.ellipse(armReach * diveDir * 10, 56 + readyBob - diveY * 0.3, shadowW, 5, 0, 0, Math.PI * 2); ctx.fill();
+
+  // Legs — dramatic split during dive
+  const shortsC = colors[1] === "#000" ? "#222" : colors[1];
+  const skinC = "#f0c8a0";
+  // Trailing leg (kicks back during dive)
+  const trailLegAng = legKick * 1.2 * (diveDir || 1);
+  const trailKnee = legKick * 0.8;
+  const tLhx = -4 * (diveDir || 1), tLhy = 30 + readyBob + readyCrouch;
+  const tLkx = tLhx + Math.sin(trailLegAng) * 16, tLky = tLhy + Math.cos(trailLegAng) * 16;
+  const tLfx = tLkx + Math.sin(trailLegAng - trailKnee) * 14, tLfy = tLky + Math.cos(trailLegAng - trailKnee) * 14;
+  ctx.strokeStyle = shortsC; ctx.lineWidth = 7; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(tLhx, tLhy); ctx.lineTo(tLkx, tLky); ctx.stroke();
+  ctx.strokeStyle = skinC; ctx.lineWidth = 5;
+  ctx.beginPath(); ctx.moveTo(tLkx, tLky); ctx.lineTo(tLfx, tLfy); ctx.stroke();
+  ctx.fillStyle = "#111"; ctx.beginPath(); ctx.ellipse(tLfx, tLfy + 2, 6, 3, trailLegAng * 0.3, 0, Math.PI * 2); ctx.fill();
+  // Leading leg (extends forward during dive)
+  const leadLegAng = -legKick * 0.6 * (diveDir || 1);
+  const leadKnee = isMoving ? legKick * 0.3 : 0.15 + Math.sin(time * 4) * 0.05;
+  const ldLhx = 4 * (diveDir || 1), ldLhy = 30 + readyBob + readyCrouch;
+  const ldLkx = ldLhx + Math.sin(leadLegAng) * 16, ldLky = ldLhy + Math.cos(leadLegAng) * 16;
+  const ldLfx = ldLkx + Math.sin(leadLegAng + leadKnee) * 14, ldLfy = ldLky + Math.cos(leadLegAng + leadKnee) * 14;
+  ctx.strokeStyle = shortsC; ctx.lineWidth = 7; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(ldLhx, ldLhy); ctx.lineTo(ldLkx, ldLky); ctx.stroke();
+  ctx.strokeStyle = skinC; ctx.lineWidth = 5;
+  ctx.beginPath(); ctx.moveTo(ldLkx, ldLky); ctx.lineTo(ldLfx, ldLfy); ctx.stroke();
+  ctx.fillStyle = "#111"; ctx.beginPath(); ctx.ellipse(ldLfx, ldLfy + 2, 6, 3, leadLegAng * 0.3, 0, Math.PI * 2); ctx.fill();
+
+  // Torso with gradient — stretches during dive
+  const stretchX = bodyStretch * 4;
+  const tg = ctx.createLinearGradient(-16 - stretchX, -8 + readyBob, 16 + stretchX, 30 + readyBob);
+  tg.addColorStop(0, shadeColor(colors[0], 25));
+  tg.addColorStop(0.5, colors[0]);
+  tg.addColorStop(1, shadeColor(colors[0], -20));
+  ctx.fillStyle = tg;
+  ctx.beginPath();
+  ctx.moveTo(-16 - stretchX, -4 + readyBob + readyCrouch);
+  ctx.quadraticCurveTo(-18 - stretchX, 14 + readyBob, -13, 32 + readyBob + readyCrouch);
+  ctx.lineTo(13, 32 + readyBob + readyCrouch);
+  ctx.quadraticCurveTo(18 + stretchX, 14 + readyBob, 16 + stretchX, -4 + readyBob + readyCrouch);
+  ctx.closePath(); ctx.fill();
+  // Number
+  ctx.fillStyle = colors[1]; ctx.font = "bold 13px Arial"; ctx.textAlign = "center";
+  ctx.fillText("1", 0, 20 + readyBob);
+
+  // Arms — two-segment with elbow for more fluid reach
+  const baseAngle = isMoving ? 0 : 0.3 + Math.sin(time * 4) * 0.1;
+  // Upper arm length, forearm length
+  const upLen = 14, foreLen = 14;
+  // Left arm
+  const laShoulderAng = -0.8 - armReach * 1.6 + (isMoving ? 0 : baseAngle);
+  const laElbowBend = isMoving ? lerp(0.4, -0.2, armReach) : 0.5;
+  const laSx = -14 - stretchX, laSy = 2 + readyBob + readyCrouch;
+  const laEx = laSx + Math.sin(laShoulderAng) * upLen, laEy = laSy + Math.cos(laShoulderAng) * upLen;
+  const laHx = laEx + Math.sin(laShoulderAng + laElbowBend) * foreLen;
+  const laHy = laEy + Math.cos(laShoulderAng + laElbowBend) * foreLen;
+  ctx.strokeStyle = colors[0]; ctx.lineWidth = 6; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(laSx, laSy); ctx.lineTo(laEx, laEy); ctx.stroke();
+  ctx.strokeStyle = shadeColor(colors[0], -10); ctx.lineWidth = 5;
+  ctx.beginPath(); ctx.moveTo(laEx, laEy); ctx.lineTo(laHx, laHy); ctx.stroke();
+  // Right arm
+  const raShoulderAng = 0.8 + armReach * 1.6 - (isMoving ? 0 : baseAngle);
+  const raElbowBend = isMoving ? lerp(-0.4, 0.2, armReach) : -0.5;
+  const raSx = 14 + stretchX, raSy = 2 + readyBob + readyCrouch;
+  const raEx = raSx + Math.sin(raShoulderAng) * upLen, raEy = raSy + Math.cos(raShoulderAng) * upLen;
+  const raHx = raEx + Math.sin(raShoulderAng + raElbowBend) * foreLen;
+  const raHy = raEy + Math.cos(raShoulderAng + raElbowBend) * foreLen;
+  ctx.strokeStyle = colors[0]; ctx.lineWidth = 6;
+  ctx.beginPath(); ctx.moveTo(raSx, raSy); ctx.lineTo(raEx, raEy); ctx.stroke();
+  ctx.strokeStyle = shadeColor(colors[0], -10); ctx.lineWidth = 5;
+  ctx.beginPath(); ctx.moveTo(raEx, raEy); ctx.lineTo(raHx, raHy); ctx.stroke();
+
+  // Gloves — bigger and glowing during dive
+  const gloveSize = 6 + armReach * 4;
+  ctx.shadowColor = "rgba(255,120,0,0.5)"; ctx.shadowBlur = armReach > 0.1 ? 10 : 4;
+  const gloveGrad1 = ctx.createRadialGradient(laHx, laHy, 0, laHx, laHy, gloveSize);
+  gloveGrad1.addColorStop(0, "#ffaa44"); gloveGrad1.addColorStop(1, "#dd5500");
+  ctx.fillStyle = gloveGrad1;
+  ctx.beginPath(); ctx.arc(laHx, laHy, gloveSize, 0, Math.PI * 2); ctx.fill();
+  const gloveGrad2 = ctx.createRadialGradient(raHx, raHy, 0, raHx, raHy, gloveSize);
+  gloveGrad2.addColorStop(0, "#ffaa44"); gloveGrad2.addColorStop(1, "#dd5500");
+  ctx.fillStyle = gloveGrad2;
+  ctx.beginPath(); ctx.arc(raHx, raHy, gloveSize, 0, Math.PI * 2); ctx.fill();
+  // Glove fingers when stretched
+  if (armReach > 0.4) {
+    ctx.strokeStyle = "#ff9030"; ctx.lineWidth = 2.2; ctx.lineCap = "round";
+    const fLen = 4 + armReach * 4;
+    for (let f = -2; f <= 2; f++) {
+      const fAng = laShoulderAng + laElbowBend + f * 0.18;
+      ctx.beginPath(); ctx.moveTo(laHx, laHy);
+      ctx.lineTo(laHx + Math.sin(fAng) * fLen, laHy + Math.cos(fAng) * fLen); ctx.stroke();
+      const fAng2 = raShoulderAng + raElbowBend + f * 0.18;
+      ctx.beginPath(); ctx.moveTo(raHx, raHy);
+      ctx.lineTo(raHx + Math.sin(fAng2) * fLen, raHy + Math.cos(fAng2) * fLen); ctx.stroke();
+    }
+  }
+  ctx.shadowBlur = 0;
+
+  // Head
+  const headY = -18 + readyBob + readyCrouch * 0.5;
+  ctx.fillStyle = "rgba(255,255,200,0.1)";
+  ctx.beginPath(); ctx.arc(0, headY, 13, 0, Math.PI * 2); ctx.fill();
+  const hg = ctx.createRadialGradient(-2, headY - 2, 1, 0, headY, 11);
+  hg.addColorStop(0, "#fdd8bc"); hg.addColorStop(1, "#d4a070");
+  ctx.fillStyle = hg;
+  ctx.beginPath(); ctx.arc(0, headY, 11, 0, Math.PI * 2); ctx.fill();
+  // Eyes — widen when diving
+  const eyeH = isMoving ? 2 : 1.5;
+  ctx.fillStyle = "#2a2a2a";
+  ctx.beginPath(); ctx.ellipse(-3.5, headY - 1, 1.5, eyeH, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(3.5, headY - 1, 1.5, eyeH, 0, 0, Math.PI * 2); ctx.fill();
+  // Mouth — open yell when diving
+  if (isMoving && armReach > 0.3) {
+    ctx.fillStyle = "#8a3030";
+    ctx.beginPath(); ctx.ellipse(0, headY + 4, 3, 2 + armReach * 2, 0, 0, Math.PI * 2); ctx.fill();
+  } else if (!isMoving) {
+    ctx.strokeStyle = "#2a2a2a"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(-2, headY + 4); ctx.lineTo(2, headY + 4); ctx.stroke();
+  }
+  // Hair
+  ctx.fillStyle = "#5c3317";
+  ctx.beginPath(); ctx.arc(0, headY - 4, 9, Math.PI, 0); ctx.fill();
+  // Keeper cap
+  ctx.fillStyle = colors[0];
+  ctx.beginPath(); ctx.arc(0, headY - 3, 10, Math.PI + 0.3, -0.3); ctx.fill();
+
+  ctx.restore();
+}
+
+function drawDetailedShooter(ctx, x, y, player, colors, kickProgress, time) {
+  ctx.save();
+  ctx.translate(x, y);
+
+  const isKicking = kickProgress > 0;
+  const kp = easeOutCubic(Math.min(kickProgress, 1));
+
+  // Ground shadow
+  ctx.fillStyle = "rgba(0,0,0,0.25)";
+  ctx.beginPath(); ctx.ellipse(isKicking ? 3 : 0, 56, 18, 5, 0, 0, Math.PI * 2); ctx.fill();
+
+  // Legs
+  const walkPhase = time * 3;
+  const leftLegAngle = isKicking ? lerp(0.3, -0.5, kp) : Math.sin(walkPhase) * 0.15;
+  const rightLegAngle = isKicking ? lerp(-0.15, 1.2, kp) : -Math.sin(walkPhase) * 0.15;
+  const leftKnee = isKicking ? lerp(0.2, 0.1, kp) : 0.15;
+  const rightKnee = isKicking ? lerp(0.2, kp < 0.5 ? 0.8 : 0.1, kp) : 0.15;
+
+  const skinColor = "#f0c8a0";
+  const shortsColor = (colors[1] === "#fff" || colors[1] === "#ffffff") ? "#eeeeee" : colors[1];
+
+  // Left leg (plant foot)
+  const lh = [-6, 28];
+  const lk = [lh[0] + Math.sin(leftLegAngle) * 15, lh[1] + Math.cos(leftLegAngle) * 15];
+  const lf = [lk[0] + Math.sin(leftLegAngle + leftKnee) * 14, lk[1] + Math.cos(leftLegAngle + leftKnee) * 14];
+  ctx.strokeStyle = shortsColor; ctx.lineWidth = 7; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(lh[0], lh[1]); ctx.lineTo(lk[0], lk[1]); ctx.stroke();
+  ctx.strokeStyle = skinColor; ctx.lineWidth = 5;
+  ctx.beginPath(); ctx.moveTo(lk[0], lk[1]); ctx.lineTo(lf[0], lf[1]); ctx.stroke();
+  ctx.fillStyle = "#111"; ctx.beginPath(); ctx.ellipse(lf[0], lf[1] + 2, 6, 3, leftLegAngle * 0.3, 0, Math.PI * 2); ctx.fill();
+
+  // Right leg (kicking foot)
+  const rh = [6, 28];
+  const rk = [rh[0] + Math.sin(rightLegAngle) * 15, rh[1] + Math.cos(rightLegAngle) * 15];
+  const rf = [rk[0] + Math.sin(rightLegAngle + rightKnee) * 14, rk[1] + Math.cos(rightLegAngle + rightKnee) * 14];
+  ctx.strokeStyle = shortsColor; ctx.lineWidth = 7; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(rh[0], rh[1]); ctx.lineTo(rk[0], rk[1]); ctx.stroke();
+  ctx.strokeStyle = skinColor; ctx.lineWidth = 5;
+  ctx.beginPath(); ctx.moveTo(rk[0], rk[1]); ctx.lineTo(rf[0], rf[1]); ctx.stroke();
+  ctx.fillStyle = "#111"; ctx.beginPath(); ctx.ellipse(rf[0], rf[1] + 2, 6, 3, rightLegAngle * 0.3, 0, Math.PI * 2); ctx.fill();
+
+  // Torso with gradient
+  const torsoLean = isKicking ? kp * 0.12 : 0;
+  ctx.save(); ctx.rotate(-torsoLean);
+  const tg = ctx.createLinearGradient(-14, -8, 14, 28);
+  tg.addColorStop(0, shadeColor(colors[0], 30));
+  tg.addColorStop(0.4, colors[0]);
+  tg.addColorStop(1, shadeColor(colors[0], -25));
+  ctx.fillStyle = tg;
+  ctx.beginPath();
+  ctx.moveTo(-14, -4); ctx.quadraticCurveTo(-16, 12, -11, 30);
+  ctx.lineTo(11, 30); ctx.quadraticCurveTo(16, 12, 14, -4);
+  ctx.closePath(); ctx.fill();
+  // Collar
+  ctx.strokeStyle = colors[1]; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(0, -4, 7, 0.3, Math.PI - 0.3); ctx.stroke();
+  // Number
+  ctx.fillStyle = colors[1]; ctx.font = "bold 12px Arial"; ctx.textAlign = "center";
+  ctx.fillText(String(player.num), 0, 18);
+  // Sleeve detail
+  ctx.strokeStyle = shadeColor(colors[0], -15); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(-14, 0); ctx.lineTo(-16, 4); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(14, 0); ctx.lineTo(16, 4); ctx.stroke();
+  ctx.restore();
+
+  // Arms
+  const armSwing = isKicking ? kp * 0.4 : Math.sin(walkPhase) * 0.1;
+  ctx.strokeStyle = colors[0]; ctx.lineWidth = 5; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(-13, 2); ctx.lineTo(-13 - Math.sin(0.5 + armSwing) * 16, 2 + Math.cos(0.5 + armSwing) * 16); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(13, 2); ctx.lineTo(13 + Math.sin(0.5 - armSwing) * 16, 2 + Math.cos(0.5 - armSwing) * 16); ctx.stroke();
+  // Hands
+  ctx.fillStyle = skinColor;
+  ctx.beginPath(); ctx.arc(-13 - Math.sin(0.5 + armSwing) * 16, 2 + Math.cos(0.5 + armSwing) * 16, 3, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(13 + Math.sin(0.5 - armSwing) * 16, 2 + Math.cos(0.5 - armSwing) * 16, 3, 0, Math.PI * 2); ctx.fill();
+
+  // Head with rim light
+  const headY = -18;
+  ctx.fillStyle = "rgba(255,255,200,0.1)";
+  ctx.beginPath(); ctx.arc(0, headY, 13, 0, Math.PI * 2); ctx.fill();
+  const hg = ctx.createRadialGradient(-2, headY - 2, 1, 0, headY, 11);
+  hg.addColorStop(0, "#fdd8bc"); hg.addColorStop(1, "#d4a070");
+  ctx.fillStyle = hg;
+  ctx.beginPath(); ctx.arc(0, headY, 11, 0, Math.PI * 2); ctx.fill();
+  // Eyes
+  ctx.fillStyle = "#2a2a2a";
+  ctx.beginPath(); ctx.arc(-3.5, headY - 1, 1.5, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(3.5, headY - 1, 1.5, 0, Math.PI * 2); ctx.fill();
+  // Focus expression when kicking
+  if (isKicking) {
+    ctx.strokeStyle = "#2a2a2a"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(-5, headY - 4); ctx.lineTo(-2, headY - 5); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(5, headY - 4); ctx.lineTo(2, headY - 5); ctx.stroke();
+  }
+
+  // Hair (detailed per style)
+  ctx.fillStyle = player.hair;
+  if (player.hairStyle === "curly") {
+    for (let a = 0; a < 10; a++) {
+      const ang = (a / 10) * Math.PI * 1.4 + Math.PI * 0.8;
+      const cx = Math.cos(ang) * 10, cy = headY - 4 + Math.sin(ang) * 7;
+      ctx.beginPath(); ctx.arc(cx, cy, 3.5 + Math.sin(a) * 0.5, 0, Math.PI * 2); ctx.fill();
+    }
+    // Extra volume on top
+    ctx.beginPath(); ctx.arc(-2, headY - 10, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(3, headY - 9, 3.5, 0, Math.PI * 2); ctx.fill();
+  } else if (player.hairStyle === "long") {
+    ctx.beginPath(); ctx.arc(0, headY - 4, 10, Math.PI + 0.1, -0.1); ctx.fill();
+    ctx.fillRect(-10, headY - 4, 3.5, 16); ctx.fillRect(6.5, headY - 4, 3.5, 16);
+  } else if (player.hairStyle === "straight") {
+    ctx.beginPath(); ctx.arc(0, headY - 4, 10, Math.PI + 0.2, -0.2); ctx.fill();
+    ctx.fillRect(-9, headY - 8, 18, 6);
+  } else {
+    ctx.beginPath(); ctx.arc(0, headY - 4, 9, Math.PI + 0.2, -0.2); ctx.fill();
+  }
+
+  // Name plate above head
+  ctx.fillStyle = "rgba(0,0,0,0.5)";
+  const nameW = ctx.measureText(player.name).width + 12;
+  ctx.beginPath();
+  const npx = -nameW / 2, npy = headY - 38;
+  ctx.roundRect(npx, npy, nameW, 18, 4);
+  ctx.fill();
+  ctx.fillStyle = "#fff"; ctx.font = "bold 11px 'Segoe UI', Arial"; ctx.textAlign = "center";
+  ctx.fillText(player.name, 0, npy + 13);
+
+  ctx.restore();
+}
+
+// ======================== DRAWING: BALL ========================
+
+function drawBall(ctx, x, y, trail, time, scale) {
+  const s = scale || 1;
+  // Trail with motion blur
+  if (trail && trail.length > 1) {
+    for (let i = 1; i < trail.length; i++) {
+      const a = (1 - i / trail.length) * 0.2;
+      const r = (8 - i * 0.7) * s;
+      if (r > 0) {
+        ctx.fillStyle = `rgba(255,255,255,${a})`;
+        ctx.beginPath(); ctx.arc(trail[i].x, trail[i].y, r, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+  }
+  // Shadow (oval, offset based on height)
+  ctx.fillStyle = "rgba(0,0,0,0.2)";
+  ctx.beginPath(); ctx.ellipse(x, y + 12 * s, 10 * s, 3 * s, 0, 0, Math.PI * 2); ctx.fill();
+  // Ball glow
+  ctx.shadowColor = "rgba(255,255,255,0.3)"; ctx.shadowBlur = 8 * s;
+  // Ball body
+  const bg = ctx.createRadialGradient(x - 2 * s, y - 2 * s, 1, x, y, 8 * s);
+  bg.addColorStop(0, "#fff"); bg.addColorStop(0.7, "#e8e8e8"); bg.addColorStop(1, "#bbb");
+  ctx.fillStyle = bg;
+  ctx.beginPath(); ctx.arc(x, y, 8 * s, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowBlur = 0;
+  // Pentagon pattern (rotating)
+  const rot = (time || 0) * 5;
+  ctx.fillStyle = "rgba(50,50,50,0.6)";
+  for (let i = 0; i < 5; i++) {
+    const a = rot + (i / 5) * Math.PI * 2;
+    const px = x + Math.cos(a) * 4 * s;
+    const py = y + Math.sin(a) * 4 * s;
+    ctx.beginPath();
+    for (let j = 0; j < 5; j++) {
+      const pa = a + (j / 5) * Math.PI * 2;
+      const vx = px + Math.cos(pa) * 1.8 * s;
+      const vy = py + Math.sin(pa) * 1.8 * s;
+      j === 0 ? ctx.moveTo(vx, vy) : ctx.lineTo(vx, vy);
+    }
+    ctx.fill();
+  }
+  // Specular highlight
+  ctx.fillStyle = "rgba(255,255,255,0.5)";
+  ctx.beginPath(); ctx.arc(x - 2.5 * s, y - 2.5 * s, 2.5 * s, 0, Math.PI * 2); ctx.fill();
+}
+
+// ======================== DRAWING: CAT ========================
+
+function drawCat(ctx, x, y, time, dir) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(dir || 1, 1);
+  const bob = Math.sin(time * 6) * 1.5;
+  const legAnim = time * 10;
+  // Tail
+  ctx.strokeStyle = "#8a8a90"; ctx.lineWidth = 2.5; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(-14, bob); ctx.quadraticCurveTo(-24, -10 + Math.sin(time * 4) * 5, -18, -20 + bob); ctx.stroke();
+  // Body shadow
+  ctx.fillStyle = "rgba(0,0,0,0.15)";
+  ctx.beginPath(); ctx.ellipse(0, 18, 14, 3, 0, 0, Math.PI * 2); ctx.fill();
+  // Body
+  const cg = ctx.createRadialGradient(-2, 2 + bob, 2, 0, 4 + bob, 16);
+  cg.addColorStop(0, "#a0a0a8"); cg.addColorStop(1, "#707078");
+  ctx.fillStyle = cg;
+  ctx.beginPath(); ctx.ellipse(0, 3 + bob, 15, 10, 0, 0, Math.PI * 2); ctx.fill();
+  // Stripes (darker gray)
+  ctx.strokeStyle = "rgba(60,60,65,0.35)"; ctx.lineWidth = 1.5;
+  for (let s = -6; s <= 6; s += 4) {
+    ctx.beginPath(); ctx.moveTo(s, -5 + bob); ctx.lineTo(s + 1, 10 + bob); ctx.stroke();
+  }
+  // Head
+  const hg = ctx.createRadialGradient(15, -5 + bob, 2, 15, -3 + bob, 10);
+  hg.addColorStop(0, "#a8a8b0"); hg.addColorStop(1, "#808088");
+  ctx.fillStyle = hg;
+  ctx.beginPath(); ctx.arc(15, -4 + bob, 9, 0, Math.PI * 2); ctx.fill();
+  // Ears
+  ctx.fillStyle = "#909098";
+  ctx.beginPath(); ctx.moveTo(10, -11 + bob); ctx.lineTo(8, -20 + bob); ctx.lineTo(14, -13 + bob); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(19, -11 + bob); ctx.lineTo(21, -20 + bob); ctx.lineTo(16, -13 + bob); ctx.fill();
+  ctx.fillStyle = "#d8a8a8";
+  ctx.beginPath(); ctx.moveTo(11, -12 + bob); ctx.lineTo(9.5, -17 + bob); ctx.lineTo(13, -13 + bob); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(18, -12 + bob); ctx.lineTo(19.5, -17 + bob); ctx.lineTo(16, -13 + bob); ctx.fill();
+  // Eyes
+  ctx.fillStyle = "#4a4"; ctx.beginPath(); ctx.ellipse(12, -5 + bob, 2, 2.5, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = "#000"; ctx.beginPath(); ctx.ellipse(12, -5 + bob, 1, 2, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = "#4a4"; ctx.beginPath(); ctx.ellipse(18, -5 + bob, 2, 2.5, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = "#000"; ctx.beginPath(); ctx.ellipse(18, -5 + bob, 1, 2, 0, 0, Math.PI * 2); ctx.fill();
+  // Nose
+  ctx.fillStyle = "#d08088";
+  ctx.beginPath(); ctx.moveTo(15, -2 + bob); ctx.lineTo(14, -0.5 + bob); ctx.lineTo(16, -0.5 + bob); ctx.fill();
+  // Whiskers
+  ctx.strokeStyle = "rgba(200,200,210,0.6)"; ctx.lineWidth = 0.7;
+  ctx.beginPath(); ctx.moveTo(8, -3 + bob); ctx.lineTo(-2, -5 + bob); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(8, -1 + bob); ctx.lineTo(-2, 0 + bob); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(22, -3 + bob); ctx.lineTo(30, -6 + bob); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(22, -1 + bob); ctx.lineTo(30, 0 + bob); ctx.stroke();
+  // Legs (animated)
+  ctx.fillStyle = "#808088";
+  const lo = [[-8, 1], [-2, -1], [6, 1], [12, -1]];
+  for (let i = 0; i < 4; i++) {
+    const phase = legAnim + i * Math.PI / 2;
+    const ext = Math.sin(phase) * 3;
+    ctx.fillRect(lo[i][0], 11 + bob, 4.5, 7 + ext + lo[i][1]);
+    // Paw
+    ctx.fillStyle = "#c0c0c8";
+    ctx.beginPath(); ctx.ellipse(lo[i][0] + 2.2, 18 + bob + ext + lo[i][1], 3, 1.5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#808088";
+  }
+  ctx.restore();
+}
+
+// ======================== DRAWING: UI OVERLAYS ========================
+
+function drawPowerBar(ctx, value) {
+  const bx = 735, by = 155, bw = 30, bh = 350;
+  // Background with glass effect
+  ctx.fillStyle = "rgba(0,0,0,0.6)";
+  ctx.beginPath(); ctx.roundRect(bx - 2, by - 2, bw + 4, bh + 4, 8); ctx.fill();
+  const glassg = ctx.createLinearGradient(bx, 0, bx + bw, 0);
+  glassg.addColorStop(0, "rgba(255,255,255,0.05)"); glassg.addColorStop(0.5, "rgba(255,255,255,0.08)"); glassg.addColorStop(1, "rgba(255,255,255,0.03)");
+  ctx.fillStyle = glassg;
+  ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 6); ctx.fill();
+
+  // Zones
+  const dangerTop = by + 2, dangerH = bh * 0.07;
+  ctx.fillStyle = "rgba(239,68,68,0.25)"; ctx.fillRect(bx + 2, dangerTop, bw - 4, dangerH);
+  const sweetTop = by + bh * (1 - 0.85), sweetH = bh * 0.3;
+  ctx.fillStyle = "rgba(34,197,94,0.15)"; ctx.fillRect(bx + 2, sweetTop, bw - 4, sweetH);
+  // Zone labels
+  ctx.fillStyle = "rgba(255,255,255,0.25)"; ctx.font = "7px Arial"; ctx.textAlign = "center";
+  ctx.fillText("MAX", bx + bw / 2, dangerTop + dangerH / 2 + 3);
+
+  // Fill bar up to value
+  const fillH = bh * value;
+  const fillY = by + bh - fillH;
+  const fg = ctx.createLinearGradient(0, fillY, 0, by + bh);
+  const r = value > 0.92 ? 1 : 0, g = value >= 0.55 && value <= 0.85 ? 1 : 0;
+  fg.addColorStop(0, g ? "rgba(34,197,94,0.4)" : r ? "rgba(239,68,68,0.4)" : "rgba(59,130,246,0.3)");
+  fg.addColorStop(1, "rgba(59,130,246,0.1)");
+  ctx.fillStyle = fg;
+  ctx.fillRect(bx + 3, fillY, bw - 6, fillH);
+
+  // Marker
+  const my = by + bh * (1 - value);
+  ctx.shadowColor = "#fff"; ctx.shadowBlur = 10;
+  ctx.fillStyle = "#fff";
+  ctx.beginPath();
+  ctx.moveTo(bx - 4, my); ctx.lineTo(bx + 6, my - 7); ctx.lineTo(bx + bw - 6, my - 7);
+  ctx.lineTo(bx + bw + 4, my); ctx.lineTo(bx + bw - 6, my + 7); ctx.lineTo(bx + 6, my + 7);
+  ctx.closePath(); ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // Label
+  ctx.fillStyle = "rgba(255,255,255,0.4)"; ctx.font = "bold 9px 'Segoe UI', Arial"; ctx.textAlign = "center";
+  ctx.fillText("KRAFT", bx + bw / 2, by + bh + 18);
+}
+
+function drawAimCursor(ctx, x, y) {
+  const s = 13;
+  // Crosshair lines
+  ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 1.8; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(x - s, y); ctx.lineTo(x - 4, y); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x + 4, y); ctx.lineTo(x + s, y); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x, y - s); ctx.lineTo(x, y - 4); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x, y + 4); ctx.lineTo(x, y + s); ctx.stroke();
+  // Center dot
+  ctx.fillStyle = "rgba(255,255,255,0.9)";
+  ctx.beginPath(); ctx.arc(x, y, 2, 0, Math.PI * 2); ctx.fill();
+}
+
+function drawDefendZones(ctx, hovered, time) {
+  const thirdW = (AIM_BOUNDS.right - AIM_BOUNDS.left) / 3;
+  const zones = [
+    { label: "← A", x: AIM_BOUNDS.left, dir: -1 },
+    { label: "↓ S", x: AIM_BOUNDS.left + thirdW, dir: 0 },
+    { label: "→ D", x: AIM_BOUNDS.right - thirdW, dir: 1 },
+  ];
+  for (const z of zones) {
+    const isH = hovered === z.dir;
+    const pulse = isH ? 1 + Math.sin(time * 8) * 0.05 : 1;
+    // Zone fill
+    ctx.fillStyle = isH ? "rgba(34,197,94,0.3)" : "rgba(255,255,255,0.06)";
+    ctx.fillRect(z.x, AIM_BOUNDS.top, thirdW, AIM_BOUNDS.bottom - AIM_BOUNDS.top);
+    // Border
+    ctx.strokeStyle = isH ? "rgba(34,197,94,0.7)" : "rgba(255,255,255,0.15)";
+    ctx.lineWidth = isH ? 2.5 : 1;
+    ctx.strokeRect(z.x, AIM_BOUNDS.top, thirdW, AIM_BOUNDS.bottom - AIM_BOUNDS.top);
+    // Arrow
+    ctx.save();
+    ctx.translate(z.x + thirdW / 2, (AIM_BOUNDS.top + AIM_BOUNDS.bottom) / 2);
+    ctx.scale(pulse, pulse);
+    ctx.fillStyle = isH ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.35)";
+    ctx.font = `bold ${isH ? 26 : 22}px 'Segoe UI', Arial`; ctx.textAlign = "center";
+    ctx.fillText(z.label, 0, 8);
+    ctx.restore();
+  }
+}
+
+function drawScoreboard(ctx, pScore, oScore, pKicks, oKicks, oppShort) {
+  // Frosted glass bar
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.beginPath(); ctx.roundRect(180, 6, 440, 38, 10); ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,0.04)";
+  ctx.beginPath(); ctx.roundRect(180, 6, 440, 19, [10, 10, 0, 0]); ctx.fill();
+  // Team names
+  ctx.fillStyle = TEAM.colors[0]; ctx.font = "bold 14px 'Segoe UI', Arial"; ctx.textAlign = "right";
+  ctx.fillText(TEAM.short, 360, 30);
+  ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.textAlign = "left";
+  ctx.fillText(oppShort, 440, 30);
+  // Score
+  ctx.fillStyle = "#fff"; ctx.font = "bold 20px 'Segoe UI', Arial"; ctx.textAlign = "center";
+  ctx.fillText(`${pScore} - ${oScore}`, 400, 33);
+  // Kick dots
+  for (let i = 0; i < 5; i++) {
+    const px = 230 + i * 20, ox = 570 - i * 20;
+    // Player
+    if (i < pKicks.length) {
+      ctx.fillStyle = pKicks[i] ? "#22c55e" : "#ef4444";
+      ctx.beginPath(); ctx.arc(px, 52, 5.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.font = "bold 8px Arial"; ctx.textAlign = "center";
+      ctx.fillText(pKicks[i] ? "✓" : "✗", px, 55);
+    } else {
+      ctx.fillStyle = "rgba(255,255,255,0.12)";
+      ctx.beginPath(); ctx.arc(px, 52, 5, 0, Math.PI * 2); ctx.fill();
+    }
+    // Opponent
+    if (i < oKicks.length) {
+      ctx.fillStyle = oKicks[i] ? "#22c55e" : "#ef4444";
+      ctx.beginPath(); ctx.arc(ox, 52, 5.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.font = "bold 8px Arial"; ctx.textAlign = "center";
+      ctx.fillText(oKicks[i] ? "✓" : "✗", ox, 55);
+    } else {
+      ctx.fillStyle = "rgba(255,255,255,0.12)";
+      ctx.beginPath(); ctx.arc(ox, 52, 5, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+}
+
+function drawResultText(ctx, text, color, progress) {
+  const scale = 0.4 + easeOutCubic(Math.min(progress * 3.5, 1)) * 0.6;
+  const alpha = progress < 1.5 ? 1 : Math.max(0, 1 - (progress - 1.5) / 0.5);
+  ctx.save();
+  ctx.translate(W / 2, 280);
+  ctx.scale(scale, scale);
+  ctx.globalAlpha = alpha;
+  // Glow
+  ctx.shadowColor = color; ctx.shadowBlur = 30;
+  ctx.fillStyle = color;
+  ctx.font = "bold 64px 'Segoe UI', Arial"; ctx.textAlign = "center";
+  ctx.fillText(text, 0, 0);
+  // Stroke for depth
+  ctx.strokeStyle = "rgba(0,0,0,0.5)"; ctx.lineWidth = 3;
+  ctx.strokeText(text, 0, 0);
+  ctx.fillText(text, 0, 0);
+  ctx.shadowBlur = 0;
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+function drawVignette(ctx) {
+  const vg = ctx.createRadialGradient(W / 2, H / 2, 200, W / 2, H / 2, 500);
+  vg.addColorStop(0, "rgba(0,0,0,0)");
+  vg.addColorStop(0.7, "rgba(0,0,0,0.08)");
+  vg.addColorStop(1, "rgba(0,0,0,0.35)");
+  ctx.fillStyle = vg;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function drawHaze(ctx) {
+  const hg = ctx.createLinearGradient(0, 300, 0, 420);
+  hg.addColorStop(0, "rgba(150,170,200,0)");
+  hg.addColorStop(0.5, "rgba(150,170,200,0.03)");
+  hg.addColorStop(1, "rgba(150,170,200,0)");
+  ctx.fillStyle = hg;
+  ctx.fillRect(0, 300, W, 120);
+}
+
+function drawParticles(ctx, particles) {
+  for (const p of particles) {
+    ctx.globalAlpha = clamp(p.life / p.maxLife, 0, 1);
+    ctx.fillStyle = p.color;
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.rot || 0);
+    if (p.type === "confetti") {
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+    } else {
+      ctx.beginPath(); ctx.arc(0, 0, p.size / 2, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function spawnGoalParticles() {
+  const ps = [];
+  const colors = ["#facc15", "#22c55e", "#3b82f6", "#ef4444", "#fff", "#a855f7", "#f97316"];
+  for (let i = 0; i < 65; i++) {
+    ps.push({
+      x: W / 2 + rand(-80, 80), y: 250 + rand(-30, 30),
+      vx: rand(-250, 250), vy: rand(-400, -80),
+      size: rand(4, 9), color: colors[Math.floor(Math.random() * colors.length)],
+      life: rand(1.0, 2.2), maxLife: 2.2,
+      rot: rand(0, Math.PI * 2), rotV: rand(-5, 5),
+      type: Math.random() > 0.3 ? "confetti" : "circle",
+    });
+  }
+  return ps;
+}
+
+function spawnGrassParticles(x, y) {
+  const ps = [];
+  for (let i = 0; i < 12; i++) {
+    ps.push({
+      x: x + rand(-5, 5), y: y + rand(-2, 2),
+      vx: rand(-60, 60), vy: rand(-120, -30),
+      size: rand(2, 4), color: `rgba(${80 + rand(0, 60)},${180 + rand(0, 60)},${60 + rand(0, 40)},0.7)`,
+      life: rand(0.3, 0.8), maxLife: 0.8, type: "circle",
+    });
+  }
+  return ps;
+}
+
+function drawInstruction(ctx, text) {
+  ctx.fillStyle = "rgba(0,0,0,0.4)";
+  ctx.beginPath(); ctx.roundRect(W / 2 - 200, H - 45, 400, 28, 6); ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,0.6)"; ctx.font = "13px 'Segoe UI', Arial"; ctx.textAlign = "center";
+  ctx.fillText(text, W / 2, H - 26);
+}
+
+// ======================== SHOOTOUT GAME COMPONENT ========================
+
+function ShootoutGame({ opponent, onMatchEnd }) {
+  const canvasRef = useRef(null);
+  const gs = useRef(null);
+  const crowd = useMemo(generateCrowd, []);
+  const stars = useMemo(generateStars, []);
+  const grass = useMemo(generateGrassBlades, []);
+
+  useEffect(() => {
+    gs.current = {
+      phase: "intro", timer: 0, time: 0,
+      kickIndex: 0, playerScore: 0, opponentScore: 0,
+      playerKicks: [], opponentKicks: [],
+      mouseX: 400, mouseY: 300,
+      aimX: 400, aimY: 285, aimLocked: false,
+      powerVal: 0, powerDir: 1, powerSpeed: 1.52,
+      ballX: PENALTY_SPOT.x, ballY: PENALTY_SPOT.y,
+      ballStartX: 0, ballStartY: 0, ballEndX: 0, ballEndY: 0,
+      ballCtrlX: 0, ballCtrlY: 0,
+      ballProgress: 0, ballDuration: 0.55, ballTrail: [], ballOver: false,
+      keeperX: KEEPER_CENTER.x, keeperY: KEEPER_CENTER.y,
+      keeperDiveDir: 0, keeperDiveProgress: 0, keeperDiveDuration: 0.38,
+      keeperDiving: false, keeperColors: opponent.keeperColors,
+      resultText: "", resultColor: "#fff", resultTimer: 0,
+      shakeX: 0, shakeY: 0, shakeAmount: 0,
+      particles: [],
+      hoveredZone: null, isPlayerShooting: true,
+      currentShooterIdx: 0, matchDecided: false,
+      catX: -50, catActive: false, catDir: 1,
+      suddenDeath: false,
+      kickAnimProgress: 0, kickAnimActive: false,
+    };
+    sfx.init();
+    setTimeout(() => sfx.whistle(), 300);
+  }, [opponent]);
+
+  const getCoords = useCallback((e) => {
+    const c = canvasRef.current; if (!c) return { x: 0, y: 0 };
+    const r = c.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * (W / r.width), y: (e.clientY - r.top) * (H / r.height) };
+  }, []);
+
+  const getThird = useCallback((x) => {
+    const tw = (AIM_BOUNDS.right - AIM_BOUNDS.left) / 3;
+    if (x < AIM_BOUNDS.left + tw) return -1;
+    if (x > AIM_BOUNDS.right - tw) return 1;
+    return 0;
+  }, []);
+
+  const checkDecided = useCallback(() => {
+    const g = gs.current;
+    if (g.suddenDeath) {
+      const pd = Math.min(g.playerKicks.length, g.opponentKicks.length);
+      return pd > 5 && g.playerKicks.length === g.opponentKicks.length && g.playerScore !== g.opponentScore;
+    }
+    const pl = 5 - g.playerKicks.length, ol = 5 - g.opponentKicks.length;
+    if (g.playerScore > g.opponentScore + ol) return true;
+    if (g.opponentScore > g.playerScore + pl) return true;
+    if (g.playerKicks.length >= 5 && g.opponentKicks.length >= 5) {
+      if (g.playerScore !== g.opponentScore) return true;
+      g.suddenDeath = true;
+    }
+    return false;
+  }, []);
+
+  const startNext = useCallback(() => {
+    const g = gs.current;
+    const total = g.playerKicks.length + g.opponentKicks.length;
+    g.isPlayerShooting = total % 2 === 0;
+    g.aimLocked = false; g.powerVal = 0; g.powerDir = 1;
+    g.ballX = PENALTY_SPOT.x; g.ballY = PENALTY_SPOT.y;
+    g.ballProgress = 0; g.ballTrail = []; g.ballOver = false;
+    g.keeperDiveDir = 0; g.keeperDiveProgress = 0; g.keeperDiving = false;
+    g.resultText = ""; g.resultTimer = 0; g.shakeAmount = 0;
+    g.kickAnimProgress = 0; g.kickAnimActive = false;
+    if (g.isPlayerShooting) {
+      g.currentShooterIdx = g.playerKicks.length % SHOOT_ORDER.length;
+      g.keeperColors = opponent.keeperColors;
+      g.phase = "aiming";
+    } else {
+      g.keeperColors = TEAM.keeperColors;
+      g.phase = "defend_ready";
+      g.hoveredZone = null;
+    }
+  }, [opponent]);
+
+  const firePlayerShot = useCallback(() => {
+    const g = gs.current;
+    g.kickAnimActive = true; g.kickAnimProgress = 0;
+    g.phase = "kick_anim";
+  }, []);
+
+  const launchBall = useCallback(() => {
+    const g = gs.current;
+    sfx.kick();
+    g.particles.push(...spawnGrassParticles(PENALTY_SPOT.x, PENALTY_SPOT.y));
+    let endX = g.aimX, endY = g.aimY;
+    const power = g.powerVal;
+    let missed = false;
+    if (power > 0.93) { endY = GOAL.crossbarY - 30 - rand(0, 40); endX = g.aimX + rand(-30, 30); missed = true; g.ballOver = true; }
+    else if (power < 0.2) { endX = lerp(g.aimX, 400, 0.6) + rand(-20, 20); endY = lerp(g.aimY, AIM_BOUNDS.bottom - 20, 0.5); }
+    else { const sd = Math.abs(power - 0.72) * 40; endX += rand(-sd, sd); endY += rand(-sd, sd); }
+    endX = clamp(endX, AIM_BOUNDS.left - 20, AIM_BOUNDS.right + 20);
+    if (!missed) endY = clamp(endY, AIM_BOUNDS.top, AIM_BOUNDS.bottom);
+    g.ballStartX = PENALTY_SPOT.x; g.ballStartY = PENALTY_SPOT.y;
+    g.ballEndX = endX; g.ballEndY = endY;
+    g.ballCtrlX = (PENALTY_SPOT.x + endX) / 2 + rand(-15, 15);
+    g.ballCtrlY = Math.min(PENALTY_SPOT.y, endY) - 60 - power * 40;
+    g.ballProgress = 0; g.ballDuration = 0.45 + (1 - power) * 0.2;
+    const r = Math.random();
+    if (r < opponent.difficulty) g.keeperDiveDir = getThird(g.aimX);
+    else g.keeperDiveDir = [-1, 0, 1][Math.floor(Math.random() * 3)];
+    g.phase = "ball_flying"; g.keeperDiving = false; g.keeperDiveProgress = 0;
+  }, [opponent, getThird]);
+
+  const resolveShot = useCallback(() => {
+    const g = gs.current;
+    if (g.ballOver) { g.resultText = "OVER!"; g.resultColor = "#f59e0b"; g.playerKicks.push(false); sfx.groan(); }
+    else {
+      const st = getThird(g.ballEndX), kt = g.keeperDiveDir;
+      const corner = (g.ballEndX < AIM_BOUNDS.left + 35 || g.ballEndX > AIM_BOUNDS.right - 35) && g.ballEndY < AIM_BOUNDS.top + 50;
+      const sweet = g.powerVal >= 0.55 && g.powerVal <= 0.85;
+      if (st === kt && !(corner && sweet && Math.random() > 0.35)) {
+        g.resultText = "REDNING!"; g.resultColor = "#ef4444"; g.playerKicks.push(false); sfx.save(); sfx.groan();
+      } else {
+        g.resultText = "MÅL!"; g.resultColor = "#22c55e"; g.playerScore++; g.playerKicks.push(true);
+        g.particles.push(...spawnGoalParticles()); g.shakeAmount = 7; sfx.net(); sfx.cheer();
+      }
+    }
+    g.resultTimer = 0; g.phase = "shot_result";
+  }, [getThird]);
+
+  const fireOpponentShot = useCallback(() => {
+    const g = gs.current; sfx.kick();
+    g.particles.push(...spawnGrassParticles(PENALTY_SPOT.x, PENALTY_SPOT.y));
+    const diff = opponent.difficulty;
+    let endX, endY;
+    if (Math.random() < 0.08 + (1 - diff) * 0.08) {
+      endX = rand(AIM_BOUNDS.left - 30, AIM_BOUNDS.right + 30);
+      endY = GOAL.crossbarY - rand(20, 60); g.ballOver = true;
+    } else {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      endX = clamp(400 + side * rand(40, 40 + diff * 100), AIM_BOUNDS.left + 5, AIM_BOUNDS.right - 5);
+      endY = rand(AIM_BOUNDS.top + 10, AIM_BOUNDS.bottom - 20); g.ballOver = false;
+    }
+    g.ballStartX = PENALTY_SPOT.x; g.ballStartY = PENALTY_SPOT.y;
+    g.ballEndX = endX; g.ballEndY = endY;
+    g.ballCtrlX = (PENALTY_SPOT.x + endX) / 2 + rand(-10, 10);
+    g.ballCtrlY = Math.min(PENALTY_SPOT.y, endY) - 70;
+    g.ballProgress = 0; g.ballDuration = 0.42 + (1 - diff) * 0.15;
+    g.keeperDiving = false; g.keeperDiveProgress = 0; g.phase = "defend_shot";
+  }, [opponent]);
+
+  const resolveDefend = useCallback(() => {
+    const g = gs.current;
+    if (g.ballOver) { g.resultText = "FORBI!"; g.resultColor = "#f59e0b"; g.opponentKicks.push(false); sfx.groan(); }
+    else {
+      if (getThird(g.ballEndX) === g.keeperDiveDir) {
+        g.resultText = "REDNING!"; g.resultColor = "#22c55e"; g.opponentKicks.push(false);
+        sfx.save(); sfx.cheer(); g.particles.push(...spawnGoalParticles());
+      } else {
+        g.resultText = "MÅL!"; g.resultColor = "#ef4444"; g.opponentScore++; g.opponentKicks.push(true);
+        g.shakeAmount = 5; sfx.net(); sfx.groan();
+      }
+    }
+    g.resultTimer = 0; g.phase = "defend_result";
+  }, [getThird]);
+
+  const advance = useCallback(() => {
+    const g = gs.current;
+    if (checkDecided()) {
+      g.phase = "match_over"; g.timer = 0;
+      if (g.playerScore > g.opponentScore) { g.particles.push(...spawnGoalParticles()); sfx.cheer(); g.catActive = true; g.catX = -50; g.catDir = 1; }
+      else sfx.groan();
+      sfx.whistle();
+    } else startNext();
+  }, [checkDecided, startNext]);
+
+  const handleMouseMove = useCallback((e) => {
+    const { x, y } = getCoords(e); const g = gs.current; if (!g) return;
+    g.mouseX = x; g.mouseY = y;
+    if (g.phase === "aiming" && !g.aimLocked) {
+      g.aimX = clamp(x, AIM_BOUNDS.left + 5, AIM_BOUNDS.right - 5);
+      g.aimY = clamp(y, AIM_BOUNDS.top + 5, AIM_BOUNDS.bottom - 5);
+    }
+    if (g.phase === "defend_ready") {
+      const tw = (AIM_BOUNDS.right - AIM_BOUNDS.left) / 3;
+      if (x >= AIM_BOUNDS.left && x <= AIM_BOUNDS.right && y >= AIM_BOUNDS.top && y <= AIM_BOUNDS.bottom) {
+        g.hoveredZone = x < AIM_BOUNDS.left + tw ? -1 : x > AIM_BOUNDS.right - tw ? 1 : 0;
+      } else g.hoveredZone = null;
+    }
+  }, [getCoords]);
+
+  const handleClick = useCallback((e) => {
+    const g = gs.current; if (!g) return; sfx.init();
+    if (g.phase === "intro") { g.phase = "starting"; g.timer = 0; }
+    else if (g.phase === "aiming") { g.aimLocked = true; g.phase = "powering"; g.powerVal = 0; g.powerDir = 1; }
+    else if (g.phase === "powering") firePlayerShot();
+    else if (g.phase === "defend_ready" && g.hoveredZone !== null) { g.keeperDiveDir = g.hoveredZone; fireOpponentShot(); }
+    else if (g.phase === "match_over" && g.timer > 1.5) onMatchEnd(g.playerScore > g.opponentScore, g.playerScore, g.opponentScore);
+  }, [firePlayerShot, fireOpponentShot, onMatchEnd]);
+
+  const handleKey = useCallback((e) => {
+    const g = gs.current; if (!g || g.phase !== "defend_ready") return;
+    if (e.key === "ArrowLeft" || e.key === "a") { g.keeperDiveDir = -1; fireOpponentShot(); }
+    else if (e.key === "ArrowDown" || e.key === "s") { g.keeperDiveDir = 0; fireOpponentShot(); }
+    else if (e.key === "ArrowRight" || e.key === "d") { g.keeperDiveDir = 1; fireOpponentShot(); }
+  }, [fireOpponentShot]);
+
+  useEffect(() => { window.addEventListener("keydown", handleKey); return () => window.removeEventListener("keydown", handleKey); }, [handleKey]);
+
+  // GAME LOOP
+  useEffect(() => {
+    let last = 0, animId;
+    function loop(ts) {
+      try {
+      const dt = last ? Math.min((ts - last) / 1000, 0.05) : 0.016;
+      last = ts;
+      const g = gs.current;
+      if (!g) { animId = requestAnimationFrame(loop); return; }
+      g.time += dt;
+
+      // Update
+      switch (g.phase) {
+        case "intro": g.timer += dt; if (g.timer > 3.2) startNext(); break;
+        case "starting": g.timer += dt; if (g.timer > 0.8) startNext(); break;
+        case "powering":
+          g.powerVal += g.powerDir * g.powerSpeed * dt;
+          if (g.powerVal >= 1) { g.powerVal = 1; g.powerDir = -1; }
+          if (g.powerVal <= 0) { g.powerVal = 0; g.powerDir = 1; }
+          break;
+        case "kick_anim":
+          g.kickAnimProgress += dt / 0.35;
+          if (g.kickAnimProgress >= 1) { g.kickAnimProgress = 1; launchBall(); }
+          break;
+        case "ball_flying": case "defend_shot": {
+          g.ballProgress += dt / g.ballDuration;
+          if (g.ballProgress > 1) g.ballProgress = 1;
+          const t = easeOutQuad(g.ballProgress);
+          g.ballX = quadBez(g.ballStartX, g.ballCtrlX, g.ballEndX, t);
+          g.ballY = quadBez(g.ballStartY, g.ballCtrlY, g.ballEndY, t);
+          g.ballTrail.unshift({ x: g.ballX, y: g.ballY });
+          if (g.ballTrail.length > 12) g.ballTrail.pop();
+          if (g.ballProgress > 0.22 && !g.keeperDiving) { g.keeperDiving = true; g.keeperDiveProgress = 0; }
+          if (g.keeperDiving) g.keeperDiveProgress = Math.min(1, g.keeperDiveProgress + dt / g.keeperDiveDuration);
+          if (g.ballProgress >= 1) { if (g.phase === "ball_flying") resolveShot(); else resolveDefend(); }
+          break;
+        }
+        case "shot_result": case "defend_result":
+          g.resultTimer += dt;
+          g.particles = g.particles.filter(p => { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 300 * dt; p.life -= dt; if (p.rot !== undefined) p.rot += (p.rotV || 0) * dt; return p.life > 0; });
+          g.shakeAmount *= Math.max(0, 1 - dt * 8);
+          if (g.resultTimer >= 2.0) advance();
+          break;
+        case "match_over":
+          g.timer += dt;
+          g.particles = g.particles.filter(p => { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 300 * dt; p.life -= dt; if (p.rot !== undefined) p.rot += (p.rotV || 0) * dt; return p.life > 0; });
+          if (g.catActive) { g.catX += g.catDir * 90 * dt; if (g.catX > W + 50) g.catDir = -1; if (g.catX < -50) g.catActive = false; }
+          if (g.timer > 0.5 && g.playerScore > g.opponentScore && g.particles.length < 8 && Math.random() < dt * 2)
+            g.particles.push(...spawnGoalParticles().slice(0, 12));
+          break;
+      }
+
+      // Shake
+      if (g.shakeAmount > 0.5) { g.shakeX = (Math.random() - 0.5) * g.shakeAmount; g.shakeY = (Math.random() - 0.5) * g.shakeAmount; }
+      else { g.shakeX = 0; g.shakeY = 0; }
+
+      // Particles (grass, etc.) update for all phases
+      if (g.phase === "kick_anim" || g.phase === "ball_flying" || g.phase === "defend_shot") {
+        g.particles = g.particles.filter(p => { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 300 * dt; p.life -= dt; return p.life > 0; });
+      }
+
+      // RENDER
+      const canvas = canvasRef.current; if (!canvas) { animId = requestAnimationFrame(loop); return; }
+      const ctx = canvas.getContext("2d");
+      ctx.save();
+      ctx.translate(g.shakeX, g.shakeY);
+
+      // Sky
+      drawSky(ctx, g.time);
+      drawStars(ctx, stars, g.time);
+      drawStadiumStructure(ctx);
+      drawCrowd(ctx, crowd, g.time);
+      drawFloodlights(ctx, g.time);
+      drawPitch(ctx, g.time);
+      drawGrass(ctx, grass, g.time);
+      drawHaze(ctx);
+      drawGoalNet(ctx);
+      drawGoalFrame(ctx);
+
+      const shooter = PLAYERS[SHOOT_ORDER[g.currentShooterIdx % SHOOT_ORDER.length]];
+
+      switch (g.phase) {
+        case "intro": {
+          const a = g.timer < 0.5 ? g.timer / 0.5 : g.timer > 2.7 ? Math.max(0, 1 - (g.timer - 2.7) / 0.5) : 1;
+          ctx.globalAlpha = a;
+          ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.beginPath(); ctx.roundRect(100, 180, 600, 180, 16); ctx.fill();
+          ctx.fillStyle = "rgba(255,255,255,0.4)"; ctx.font = "bold 15px 'Segoe UI', Arial"; ctx.textAlign = "center";
+          ctx.fillText(opponent.label.toUpperCase(), 400, 220);
+          ctx.font = "bold 32px 'Segoe UI', Arial";
+          ctx.fillStyle = TEAM.colors[0]; ctx.fillText(TEAM.name, 400, 270);
+          ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.font = "24px 'Segoe UI', Arial"; ctx.fillText("vs", 400, 300);
+          ctx.fillStyle = (opponent.colors[0] === "#fff" || opponent.colors[0] === "#ffffff") ? "#dddddd" : opponent.colors[0]; ctx.font = "bold 32px 'Segoe UI', Arial";
+          ctx.fillText(opponent.name, 400, 335);
+          ctx.globalAlpha = 1;
+          drawInstruction(ctx, "Klik for at starte");
+          break;
+        }
+        case "starting":
+          drawDetailedKeeper(ctx, KEEPER_CENTER.x, KEEPER_CENTER.y, 0, 0, opponent.keeperColors, g.time);
+          drawBall(ctx, PENALTY_SPOT.x, PENALTY_SPOT.y, [], g.time);
+          drawScoreboard(ctx, g.playerScore, g.opponentScore, g.playerKicks, g.opponentKicks, opponent.short);
+          break;
+        case "aiming":
+          drawDetailedKeeper(ctx, KEEPER_CENTER.x, KEEPER_CENTER.y, 0, 0, opponent.keeperColors, g.time);
+          drawDetailedShooter(ctx, PENALTY_SPOT.x, PENALTY_SPOT.y - 35, shooter, TEAM.colors, 0, g.time);
+          drawBall(ctx, PENALTY_SPOT.x, PENALTY_SPOT.y, [], g.time);
+          drawAimCursor(ctx, g.aimX, g.aimY);
+          drawScoreboard(ctx, g.playerScore, g.opponentScore, g.playerKicks, g.opponentKicks, opponent.short);
+          drawInstruction(ctx, `${shooter.name} skyder — klik for at sigte`);
+          break;
+        case "powering":
+          drawDetailedKeeper(ctx, KEEPER_CENTER.x, KEEPER_CENTER.y, 0, 0, opponent.keeperColors, g.time);
+          drawDetailedShooter(ctx, PENALTY_SPOT.x, PENALTY_SPOT.y - 35, shooter, TEAM.colors, 0, g.time);
+          drawBall(ctx, PENALTY_SPOT.x, PENALTY_SPOT.y, [], g.time);
+          drawAimCursor(ctx, g.aimX, g.aimY);
+          drawPowerBar(ctx, g.powerVal);
+          drawScoreboard(ctx, g.playerScore, g.opponentScore, g.playerKicks, g.opponentKicks, opponent.short);
+          drawInstruction(ctx, "Klik for kraft!");
+          break;
+        case "kick_anim":
+          drawDetailedKeeper(ctx, KEEPER_CENTER.x, KEEPER_CENTER.y, 0, 0, opponent.keeperColors, g.time);
+          drawDetailedShooter(ctx, PENALTY_SPOT.x + g.kickAnimProgress * 5, PENALTY_SPOT.y - 35, shooter, TEAM.colors, g.kickAnimProgress, g.time);
+          if (g.kickAnimProgress < 0.7) drawBall(ctx, PENALTY_SPOT.x, PENALTY_SPOT.y, [], g.time);
+          drawParticles(ctx, g.particles);
+          drawScoreboard(ctx, g.playerScore, g.opponentScore, g.playerKicks, g.opponentKicks, opponent.short);
+          break;
+        case "ball_flying":
+          drawDetailedKeeper(ctx, KEEPER_CENTER.x, KEEPER_CENTER.y, g.keeperDiveProgress, g.keeperDiveDir, opponent.keeperColors, g.time);
+          if (g.ballProgress < 0.2) drawDetailedShooter(ctx, PENALTY_SPOT.x + 5, PENALTY_SPOT.y - 35, shooter, TEAM.colors, 1, g.time);
+          drawBall(ctx, g.ballX, g.ballY, g.ballTrail, g.time, 1 - g.ballProgress * 0.25);
+          drawParticles(ctx, g.particles);
+          drawScoreboard(ctx, g.playerScore, g.opponentScore, g.playerKicks, g.opponentKicks, opponent.short);
+          break;
+        case "shot_result":
+          drawDetailedKeeper(ctx, KEEPER_CENTER.x, KEEPER_CENTER.y, g.keeperDiveProgress, g.keeperDiveDir, opponent.keeperColors, g.time);
+          drawBall(ctx, g.ballEndX, g.ballEndY, [], g.time, 0.75);
+          drawScoreboard(ctx, g.playerScore, g.opponentScore, g.playerKicks, g.opponentKicks, opponent.short);
+          drawResultText(ctx, g.resultText, g.resultColor, g.resultTimer);
+          drawParticles(ctx, g.particles);
+          break;
+        case "defend_ready":
+          drawDetailedKeeper(ctx, KEEPER_CENTER.x, KEEPER_CENTER.y, 0, 0, TEAM.keeperColors, g.time);
+          drawBall(ctx, PENALTY_SPOT.x, PENALTY_SPOT.y, [], g.time);
+          drawDefendZones(ctx, g.hoveredZone, g.time);
+          drawScoreboard(ctx, g.playerScore, g.opponentScore, g.playerKicks, g.opponentKicks, opponent.short);
+          drawInstruction(ctx, "Modstander skyder — vælg retning (klik eller A/S/D)");
+          break;
+        case "defend_shot":
+          drawDetailedKeeper(ctx, KEEPER_CENTER.x, KEEPER_CENTER.y, g.keeperDiveProgress, g.keeperDiveDir, TEAM.keeperColors, g.time);
+          drawBall(ctx, g.ballX, g.ballY, g.ballTrail, g.time, 1 - g.ballProgress * 0.25);
+          drawParticles(ctx, g.particles);
+          drawScoreboard(ctx, g.playerScore, g.opponentScore, g.playerKicks, g.opponentKicks, opponent.short);
+          break;
+        case "defend_result":
+          drawDetailedKeeper(ctx, KEEPER_CENTER.x, KEEPER_CENTER.y, g.keeperDiveProgress, g.keeperDiveDir, TEAM.keeperColors, g.time);
+          drawBall(ctx, g.ballEndX, g.ballEndY, [], g.time, 0.75);
+          drawScoreboard(ctx, g.playerScore, g.opponentScore, g.playerKicks, g.opponentKicks, opponent.short);
+          drawResultText(ctx, g.resultText, g.resultColor, g.resultTimer);
+          drawParticles(ctx, g.particles);
+          break;
+        case "match_over": {
+          drawDetailedKeeper(ctx, KEEPER_CENTER.x, KEEPER_CENTER.y, 0, 0, TEAM.keeperColors, g.time);
+          drawScoreboard(ctx, g.playerScore, g.opponentScore, g.playerKicks, g.opponentKicks, opponent.short);
+          drawParticles(ctx, g.particles);
+          ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.beginPath(); ctx.roundRect(150, 180, 500, 170, 16); ctx.fill();
+          const won = g.playerScore > g.opponentScore;
+          ctx.shadowColor = won ? "rgba(34,197,94,0.5)" : "rgba(239,68,68,0.3)"; ctx.shadowBlur = 20;
+          ctx.fillStyle = won ? "#22c55e" : "#ef4444"; ctx.font = "bold 44px 'Segoe UI', Arial"; ctx.textAlign = "center";
+          ctx.fillText(won ? "SEJR!" : "NEDERLAG", 400, 240);
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = "#fff"; ctx.font = "bold 30px 'Segoe UI', Arial";
+          ctx.fillText(`${g.playerScore} - ${g.opponentScore}`, 400, 290);
+          if (g.timer > 1.5) drawInstruction(ctx, won ? "Klik for at fortsætte" : "Klik for at prøve igen");
+          if (g.catActive) drawCat(ctx, g.catX, 430, g.time, g.catDir);
+          break;
+        }
+      }
+
+      drawVignette(ctx);
+      ctx.restore();
+      } catch(e) { console.error("Game loop error:", e); }
+      animId = requestAnimationFrame(loop);
+    }
+    animId = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(animId);
+  }, [startNext, launchBall, resolveShot, resolveDefend, advance, opponent, crowd, stars, grass]);
+
+  return (
+    <canvas ref={canvasRef} width={W} height={H}
+      onMouseMove={handleMouseMove} onClick={handleClick}
+      style={{ width: "100%", maxWidth: 800, height: "auto", aspectRatio: "800/600",
+        display: "block", margin: "0 auto", cursor: "crosshair",
+        borderRadius: 10, boxShadow: "0 0 60px rgba(37,99,235,0.25), 0 0 120px rgba(37,99,235,0.1)" }}
+    />
+  );
+}
+
+// ======================== UI SCREENS ========================
+
+function TitleScreen({ onStart }) {
+  const [t, setT] = useState(0);
+  useEffect(() => { let id, v = 0; const f = () => { v += 0.016; setT(v); id = requestAnimationFrame(f); }; id = requestAnimationFrame(f); return () => cancelAnimationFrame(id); }, []);
+  return (
+    <div onClick={() => { sfx.init(); onStart(); }} style={{
+      width: "100%", maxWidth: 800, margin: "0 auto", aspectRatio: "800/600",
+      background: "linear-gradient(135deg, #020210 0%, #0a1040 40%, #150a30 100%)",
+      borderRadius: 10, display: "flex", flexDirection: "column", alignItems: "center",
+      justifyContent: "center", cursor: "pointer", position: "relative", overflow: "hidden",
+      boxShadow: "0 0 60px rgba(37,99,235,0.25)", fontFamily: "'Segoe UI', Arial, sans-serif",
+    }}>
+      {/* Animated gradient orb */}
+      <div style={{ position: "absolute", width: 400, height: 400, borderRadius: "50%",
+        background: "radial-gradient(circle, rgba(37,99,235,0.12) 0%, rgba(37,99,235,0.03) 40%, transparent 70%)",
+        top: "15%", left: "50%", transform: `translate(-50%, -50%) scale(${1 + Math.sin(t * 0.8) * 0.15})`, }} />
+      {/* Stars */}
+      {[...Array(25)].map((_, i) => (
+        <div key={i} style={{ position: "absolute", left: `${(i * 37 + 13) % 100}%`, top: `${(i * 23 + 7) % 65}%`,
+          width: 1.5 + (i % 3), height: 1.5 + (i % 3), borderRadius: "50%", background: "#fff",
+          opacity: 0.15 + Math.sin(t * 2 + i * 1.3) * 0.25, }} />
+      ))}
+      {/* Football icon */}
+      <div style={{ fontSize: 48, marginBottom: 4, transform: `rotate(${Math.sin(t) * 8}deg)`,
+        filter: "drop-shadow(0 0 20px rgba(255,255,255,0.15))", position: "relative", zIndex: 1 }}>⚽</div>
+      <div style={{ position: "relative", zIndex: 1, textAlign: "center" }}>
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", letterSpacing: 6, marginBottom: 12, textTransform: "uppercase" }}>
+          KongeHuset Arena præsenterer
+        </div>
+        <h1 style={{ fontSize: 52, fontWeight: 900, color: "#fff", margin: "4px 0",
+          textShadow: "0 0 40px rgba(37,99,235,0.5), 0 0 80px rgba(37,99,235,0.2), 0 2px 4px rgba(0,0,0,0.8)",
+          letterSpacing: 2, lineHeight: 1.1 }}>EDGARS</h1>
+        <h2 style={{ fontSize: 26, fontWeight: 700, color: "#3b82f6", margin: "0 0 20px",
+          textShadow: "0 0 20px rgba(37,99,235,0.3)", letterSpacing: 3 }}>FODBOLDUDFORDRING</h2>
+        <div style={{ fontSize: 15, color: "#facc15", marginBottom: 36,
+          textShadow: "0 0 12px rgba(250,204,21,0.25)" }}>⭐ Tillykke med 12-års fødselsdagen! ⭐</div>
+        <div style={{ display: "inline-block", padding: "16px 56px",
+          background: "linear-gradient(135deg, #2563eb, #1d4ed8)",
+          borderRadius: 10, color: "#fff", fontSize: 22, fontWeight: 800, letterSpacing: 3,
+          boxShadow: "0 4px 30px rgba(37,99,235,0.4), inset 0 1px 0 rgba(255,255,255,0.15), 0 0 60px rgba(37,99,235,0.15)",
+          transform: `scale(${1 + Math.sin(t * 2.5) * 0.02})`, }}>SPIL</div>
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", marginTop: 28, letterSpacing: 1 }}>
+          Klik hvor som helst for at starte
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PlayerCard({ player, teamColors, isKeeper, isCoach, isMascot }) {
+  return (
+    <div style={{ background: "rgba(255,255,255,0.04)", borderRadius: 10, padding: "14px 10px",
+      textAlign: "center", border: "1px solid rgba(255,255,255,0.06)", minWidth: 82, flex: "0 0 auto",
+      backdropFilter: "blur(4px)", transition: "transform 0.2s", }}>
+      <div style={{ width: 48, height: 48, borderRadius: "50%", margin: "0 auto 8px",
+        background: isMascot ? "linear-gradient(135deg, #9ca3af, #6b7280)" : isCoach ? "linear-gradient(135deg, #6b7280, #4b5563)" :
+          isKeeper ? "linear-gradient(135deg, #22c55e, #16a34a)" : `linear-gradient(135deg, ${teamColors[0]}, ${shadeColor(teamColors[0], -20)})`,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: isMascot ? 24 : 17, fontWeight: 700, color: teamColors[1],
+        border: `2px solid ${player.num === 10 ? "#facc15" : "rgba(255,255,255,0.1)"}`,
+        boxShadow: player.num === 10 ? "0 0 16px rgba(250,204,21,0.3)" : "0 2px 8px rgba(0,0,0,0.3)", }}>
+        {isMascot ? "🐱" : isCoach ? "👤" : player.num}
+      </div>
+      <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{player.name}</div>
+      <div style={{ fontSize: 9, color: "rgba(255,255,255,0.35)", marginTop: 3, textTransform: "uppercase", letterSpacing: 1 }}>{player.role}</div>
+    </div>
+  );
+}
+
+function TeamScreen({ onContinue }) {
+  return (
+    <div style={{ width: "100%", maxWidth: 800, margin: "0 auto", aspectRatio: "800/600",
+      background: "linear-gradient(180deg, #020210 0%, #0a1040 100%)",
+      borderRadius: 10, display: "flex", flexDirection: "column", alignItems: "center",
+      padding: "28px 20px", boxSizing: "border-box", overflow: "auto",
+      boxShadow: "0 0 60px rgba(37,99,235,0.25)", fontFamily: "'Segoe UI', Arial, sans-serif", }}>
+      <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", letterSpacing: 5, textTransform: "uppercase" }}>Dit hold</div>
+      <h2 style={{ fontSize: 30, fontWeight: 900, color: "#fff", margin: "4px 0 2px" }}>FC Kongehuset</h2>
+      <div style={{ width: 80, height: 2, background: "linear-gradient(90deg, transparent, #2563eb, transparent)", margin: "8px 0 22px" }} />
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "center", marginBottom: 18 }}>
+        {PLAYERS.map((p, i) => <PlayerCard key={i} player={p} teamColors={TEAM.colors} isKeeper={p.role === "Målmand"} />)}
+      </div>
+      <div style={{ display: "flex", gap: 10, marginBottom: 24 }}>
+        <PlayerCard player={COACH} teamColors={TEAM.colors} isCoach />
+        <PlayerCard player={{ name: "Måvens", role: "Maskot", num: "🐱" }} teamColors={TEAM.colors} isMascot />
+      </div>
+      <button onClick={onContinue} style={{ padding: "14px 48px",
+        background: "linear-gradient(135deg, #2563eb, #1d4ed8)", border: "none", borderRadius: 10,
+        color: "#fff", fontSize: 18, fontWeight: 800, cursor: "pointer", letterSpacing: 2,
+        boxShadow: "0 4px 30px rgba(37,99,235,0.35)", }}>TURNERING →</button>
+    </div>
+  );
+}
+
+function BracketScreen({ results, currentMatch, onStartMatch }) {
+  return (
+    <div style={{ width: "100%", maxWidth: 800, margin: "0 auto", aspectRatio: "800/600",
+      background: "linear-gradient(180deg, #020210 0%, #0a1040 100%)",
+      borderRadius: 10, display: "flex", flexDirection: "column", alignItems: "center",
+      justifyContent: "center", padding: 24, boxSizing: "border-box",
+      boxShadow: "0 0 60px rgba(37,99,235,0.25)", fontFamily: "'Segoe UI', Arial, sans-serif", }}>
+      <h2 style={{ fontSize: 26, fontWeight: 900, color: "#fff", margin: "0 0 4px", letterSpacing: 2 }}>TURNERING</h2>
+      <div style={{ width: 60, height: 2, background: "linear-gradient(90deg, transparent, #2563eb, transparent)", margin: "0 0 36px" }} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 18, width: "100%", maxWidth: 480 }}>
+        {OPPONENTS.map((opp, i) => {
+          const r = results[i], isCur = i === currentMatch, locked = i > currentMatch;
+          return (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 16, padding: "16px 22px",
+              background: isCur ? "rgba(37,99,235,0.1)" : "rgba(255,255,255,0.02)",
+              borderRadius: 12, border: isCur ? "1.5px solid rgba(37,99,235,0.35)" : "1px solid rgba(255,255,255,0.04)",
+              opacity: locked ? 0.35 : 1, transition: "opacity 0.3s", }}>
+              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: 700, width: 85, textTransform: "uppercase", letterSpacing: 1 }}>{opp.label}</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "#fff" }}>FC Kongehuset vs {opp.name}</div>
+                {r && <div style={{ fontSize: 12, color: r.won ? "#22c55e" : "#ef4444", marginTop: 3 }}>{r.playerScore} - {r.opponentScore} {r.won ? "✓" : "✗"}</div>}
+              </div>
+              {isCur && !r && <button onClick={() => onStartMatch(i)} style={{ padding: "10px 28px", background: "linear-gradient(135deg, #2563eb, #1d4ed8)",
+                border: "none", borderRadius: 8, color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer", letterSpacing: 1,
+                boxShadow: "0 2px 16px rgba(37,99,235,0.3)" }}>SPIL</button>}
+              {r && <div style={{ width: 34, height: 34, borderRadius: "50%", background: r.won ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)",
+                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, color: r.won ? "#22c55e" : "#ef4444" }}>{r.won ? "✓" : "✗"}</div>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function VictoryScreen({ onRestart }) {
+  const [t, setT] = useState(0);
+  useEffect(() => { sfx.init(); sfx.cheer(); let id, v = 0; const f = () => { v += 0.016; setT(v); id = requestAnimationFrame(f); }; id = requestAnimationFrame(f); return () => cancelAnimationFrame(id); }, []);
+  return (
+    <div style={{ width: "100%", maxWidth: 800, margin: "0 auto", aspectRatio: "800/600",
+      background: "linear-gradient(180deg, #020210 0%, #150820 50%, #0a1040 100%)",
+      borderRadius: 10, display: "flex", flexDirection: "column", alignItems: "center",
+      justifyContent: "center", position: "relative", overflow: "hidden",
+      boxShadow: "0 0 80px rgba(250,204,21,0.2)", fontFamily: "'Segoe UI', Arial, sans-serif", }}>
+      {[...Array(35)].map((_, i) => (
+        <div key={i} style={{ position: "absolute", left: `${(i * 29 + 5) % 100}%`,
+          top: `${((t * 35 + i * 67) % 130) - 15}%`,
+          width: 5 + (i % 4) * 2, height: 4 + (i % 3) * 3,
+          background: ["#facc15", "#22c55e", "#3b82f6", "#ef4444", "#a855f7", "#fff"][i % 6],
+          borderRadius: i % 3 === 0 ? "50%" : 1, opacity: 0.6,
+          transform: `rotate(${t * 80 + i * 35}deg)`, }} />
+      ))}
+      <div style={{ position: "relative", zIndex: 1, textAlign: "center" }}>
+        <div style={{ fontSize: 72, marginBottom: 4, transform: `scale(${1 + Math.sin(t * 3) * 0.06}) rotate(${Math.sin(t * 2) * 3}deg)`,
+          filter: "drop-shadow(0 0 30px rgba(250,204,21,0.4))" }}>🏆</div>
+        <h1 style={{ fontSize: 38, fontWeight: 900, color: "#facc15", margin: "0 0 12px",
+          textShadow: "0 0 40px rgba(250,204,21,0.35), 0 2px 4px rgba(0,0,0,0.6)" }}>
+          FC KONGEHUSET ER MESTRE!</h1>
+        <div style={{ fontSize: 22, color: "#fff", margin: "12px 0 6px" }}>Tillykke Edgar! 🎉</div>
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", marginBottom: 36 }}>
+          Du vandt turneringen i KongeHuset Arena!</div>
+        <button onClick={onRestart} style={{ padding: "14px 48px",
+          background: "linear-gradient(135deg, #facc15, #d97706)", border: "none", borderRadius: 10,
+          color: "#000", fontSize: 18, fontWeight: 800, cursor: "pointer", letterSpacing: 2,
+          boxShadow: "0 4px 30px rgba(250,204,21,0.3)" }}>SPIL IGEN</button>
+      </div>
+    </div>
+  );
+}
+
+function DefeatScreen({ opponentName, onRetry }) {
+  return (
+    <div style={{ width: "100%", maxWidth: 800, margin: "0 auto", aspectRatio: "800/600",
+      background: "linear-gradient(180deg, #020210 0%, #200808 100%)",
+      borderRadius: 10, display: "flex", flexDirection: "column", alignItems: "center",
+      justifyContent: "center", boxShadow: "0 0 60px rgba(239,68,68,0.15)", fontFamily: "'Segoe UI', Arial, sans-serif", }}>
+      <div style={{ fontSize: 52, marginBottom: 16 }}>😔</div>
+      <h2 style={{ fontSize: 30, fontWeight: 900, color: "#ef4444", margin: "0 0 12px" }}>NEDERLAG</h2>
+      <div style={{ fontSize: 15, color: "rgba(255,255,255,0.5)", marginBottom: 36 }}>{opponentName} vandt denne gang...</div>
+      <button onClick={onRetry} style={{ padding: "14px 48px",
+        background: "linear-gradient(135deg, #2563eb, #1d4ed8)", border: "none", borderRadius: 10,
+        color: "#fff", fontSize: 18, fontWeight: 800, cursor: "pointer", letterSpacing: 2,
+        boxShadow: "0 4px 30px rgba(37,99,235,0.3)" }}>PRØV IGEN</button>
+    </div>
+  );
+}
+
+// ======================== DESIGN PLAYER SCREEN ========================
+
+const POSITIONS = [
+  { id: "Målmand", label: "Målmand", short: "MV", x: 50, y: 90, desc: "Den sidste forsvarslinje" },
+  { id: "Forsvar", label: "Forsvar", short: "FO", x: 50, y: 70, desc: "Hold modstanderne væk" },
+  { id: "Midtbane", label: "Midtbane", short: "MB", x: 50, y: 45, desc: "Styr spillet fra midten" },
+  { id: "Angriber", label: "Angriber", short: "AN", x: 50, y: 22, desc: "Scor målene!" },
+];
+
+const SKILL_DEFS = [
+  { id: "fart", label: "Fart", icon: "⚡", color: "#3b82f6" },
+  { id: "styrke", label: "Styrke", icon: "💪", color: "#ef4444" },
+  { id: "skud", label: "Skud", icon: "🎯", color: "#22c55e" },
+  { id: "teknik", label: "Teknik", icon: "✨", color: "#a855f7" },
+  { id: "forsvar", label: "Forsvar", icon: "🛡️", color: "#f59e0b" },
+];
+
+const UNIFORM_COLORS = [
+  "#2563eb", "#1d4ed8", "#3b82f6", "#60a5fa",
+  "#ef4444", "#dc2626", "#f97316", "#facc15",
+  "#22c55e", "#16a34a", "#14b8a6",
+  "#a855f7", "#8b5cf6", "#ec4899",
+  "#ffffff", "#e5e7eb", "#9ca3af", "#374151", "#111111",
+];
+
+function DesignPlayerScreen({ onDone }) {
+  const [position, setPosition] = useState("Angriber");
+  const [primaryColor, setPrimaryColor] = useState("#2563eb");
+  const [secondaryColor, setSecondaryColor] = useState("#ffffff");
+  const [skills, setSkills] = useState({ fart: 2, styrke: 2, skud: 3, teknik: 2, forsvar: 1 });
+  const maxPoints = 15;
+  const usedPoints = Object.values(skills).reduce((a, b) => a + b, 0);
+  const remaining = maxPoints - usedPoints;
+
+  const addSkill = (id) => { if (remaining > 0 && skills[id] < 5) setSkills(s => ({ ...s, [id]: s[id] + 1 })); };
+  const subSkill = (id) => { if (skills[id] > 0) setSkills(s => ({ ...s, [id]: s[id] - 1 })); };
+
+  return (
+    <div style={{ width: "100%", maxWidth: 800, margin: "0 auto", aspectRatio: "800/600",
+      background: "linear-gradient(180deg, #020210 0%, #0a1040 100%)",
+      borderRadius: 10, display: "flex", flexDirection: "column",
+      padding: "20px 24px", boxSizing: "border-box", overflow: "auto",
+      boxShadow: "0 0 60px rgba(37,99,235,0.25)", fontFamily: "'Segoe UI', Arial, sans-serif", color: "#fff" }}>
+
+      <div style={{ textAlign: "center", marginBottom: 16 }}>
+        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", letterSpacing: 5, textTransform: "uppercase" }}>Edgar</div>
+        <h2 style={{ fontSize: 24, fontWeight: 900, margin: "2px 0" }}>DESIGN DIN SPILLER</h2>
+        <div style={{ width: 60, height: 2, background: "linear-gradient(90deg, transparent, #2563eb, transparent)", margin: "6px auto" }} />
+      </div>
+
+      <div style={{ display: "flex", gap: 20, flex: 1, minHeight: 0 }}>
+        {/* LEFT: Position selector */}
+        <div style={{ flex: "0 0 200px", display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", letterSpacing: 2, textTransform: "uppercase", marginBottom: 2 }}>Position</div>
+          <div style={{ background: "linear-gradient(180deg, #176834, #25924a)", borderRadius: 10, padding: "12px 8px",
+            position: "relative", height: 200, border: "1px solid rgba(255,255,255,0.08)" }}>
+            {/* Field lines */}
+            <div style={{ position: "absolute", left: "15%", right: "15%", top: "40%", bottom: "5%",
+              border: "1px solid rgba(255,255,255,0.15)", borderRadius: 2 }} />
+            <div style={{ position: "absolute", left: "30%", right: "30%", top: "60%", bottom: "5%",
+              border: "1px solid rgba(255,255,255,0.12)", borderRadius: 2 }} />
+            <div style={{ position: "absolute", left: "42%", right: "42%", top: "47%",
+              width: "16%", height: "1px", background: "rgba(255,255,255,0.2)" }} />
+            {/* Position markers */}
+            {POSITIONS.map(p => {
+              const sel = position === p.id;
+              return (
+                <div key={p.id} onClick={() => setPosition(p.id)}
+                  style={{ position: "absolute", left: `${p.x}%`, top: `${p.y}%`, transform: "translate(-50%, -50%)",
+                    cursor: "pointer", textAlign: "center", transition: "all 0.2s", zIndex: sel ? 2 : 1 }}>
+                  <div style={{ width: sel ? 36 : 28, height: sel ? 36 : 28, borderRadius: "50%",
+                    background: sel ? `linear-gradient(135deg, ${primaryColor}, ${shadeColor(primaryColor, -25)})` : "rgba(255,255,255,0.12)",
+                    border: sel ? "2px solid #facc15" : "1.5px solid rgba(255,255,255,0.2)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: sel ? 11 : 9, fontWeight: 700, color: sel ? secondaryColor : "rgba(255,255,255,0.6)",
+                    boxShadow: sel ? "0 0 16px rgba(250,204,21,0.4)" : "none",
+                    margin: "0 auto", transition: "all 0.2s" }}>{p.short}</div>
+                  <div style={{ fontSize: 8, color: sel ? "#facc15" : "rgba(255,255,255,0.35)", marginTop: 2, fontWeight: sel ? 700 : 400 }}>{p.label}</div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", textAlign: "center", marginTop: 2 }}>
+            {POSITIONS.find(p => p.id === position)?.desc}
+          </div>
+        </div>
+
+        {/* MIDDLE: Uniform preview + colors */}
+        <div style={{ flex: "0 0 180px", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", letterSpacing: 2, textTransform: "uppercase", marginBottom: 2 }}>Trøje</div>
+          {/* Jersey preview */}
+          <div style={{ width: 100, height: 120, position: "relative", margin: "0 auto 8px" }}>
+            <svg width="100" height="120" viewBox="0 0 100 120">
+              {/* Torso */}
+              <path d="M25,25 L15,35 L15,95 Q15,105 25,105 L75,105 Q85,105 85,95 L85,35 L75,25 Z"
+                fill={primaryColor} stroke={shadeColor(primaryColor, -30)} strokeWidth="1.5" />
+              {/* Sleeves */}
+              <path d="M25,25 L5,45 L5,55 L15,55 L15,35 L25,30 Z" fill={primaryColor} stroke={shadeColor(primaryColor, -30)} strokeWidth="1" />
+              <path d="M75,25 L95,45 L95,55 L85,55 L85,35 L75,30 Z" fill={primaryColor} stroke={shadeColor(primaryColor, -30)} strokeWidth="1" />
+              {/* Collar */}
+              <path d="M35,22 Q50,30 65,22" fill="none" stroke={secondaryColor} strokeWidth="2.5" />
+              {/* Number */}
+              <text x="50" y="72" textAnchor="middle" fill={secondaryColor} fontSize="28" fontWeight="900" fontFamily="Arial">10</text>
+              {/* Shoulder stripes */}
+              <line x1="20" y1="28" x2="15" y2="40" stroke={secondaryColor} strokeWidth="2" opacity="0.6" />
+              <line x1="80" y1="28" x2="85" y2="40" stroke={secondaryColor} strokeWidth="2" opacity="0.6" />
+            </svg>
+          </div>
+          {/* Color pickers */}
+          <div style={{ width: "100%" }}>
+            <div style={{ fontSize: 9, color: "rgba(255,255,255,0.35)", marginBottom: 4 }}>Primær farve</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginBottom: 8 }}>
+              {UNIFORM_COLORS.map(c => (
+                <div key={`p-${c}`} onClick={() => setPrimaryColor(c)}
+                  style={{ width: 18, height: 18, borderRadius: 4, background: c, cursor: "pointer",
+                    border: primaryColor === c ? "2px solid #facc15" : "1px solid rgba(255,255,255,0.15)",
+                    boxShadow: primaryColor === c ? "0 0 8px rgba(250,204,21,0.4)" : "none" }} />
+              ))}
+            </div>
+            <div style={{ fontSize: 9, color: "rgba(255,255,255,0.35)", marginBottom: 4 }}>Sekundær farve</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+              {UNIFORM_COLORS.map(c => (
+                <div key={`s-${c}`} onClick={() => setSecondaryColor(c)}
+                  style={{ width: 18, height: 18, borderRadius: 4, background: c, cursor: "pointer",
+                    border: secondaryColor === c ? "2px solid #facc15" : "1px solid rgba(255,255,255,0.15)",
+                    boxShadow: secondaryColor === c ? "0 0 8px rgba(250,204,21,0.4)" : "none" }} />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* RIGHT: Skill points */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", letterSpacing: 2, textTransform: "uppercase" }}>Egenskaber</div>
+            <div style={{ fontSize: 12, color: remaining > 0 ? "#facc15" : "#22c55e", fontWeight: 700 }}>
+              {remaining} point tilbage
+            </div>
+          </div>
+          {SKILL_DEFS.map(sd => (
+            <div key={sd.id} style={{ background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "8px 12px",
+              border: "1px solid rgba(255,255,255,0.05)", display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ fontSize: 18, width: 28, textAlign: "center" }}>{sd.icon}</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{sd.label}</div>
+                <div style={{ display: "flex", gap: 3 }}>
+                  {[0,1,2,3,4].map(i => (
+                    <div key={i} style={{ width: 32, height: 8, borderRadius: 3,
+                      background: i < skills[sd.id] ? sd.color : "rgba(255,255,255,0.08)",
+                      boxShadow: i < skills[sd.id] ? `0 0 6px ${sd.color}44` : "none",
+                      transition: "all 0.2s" }} />
+                  ))}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 4 }}>
+                <button onClick={() => subSkill(sd.id)}
+                  style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)",
+                    background: skills[sd.id] > 0 ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.02)",
+                    color: skills[sd.id] > 0 ? "#fff" : "rgba(255,255,255,0.2)", fontSize: 16, fontWeight: 700,
+                    cursor: skills[sd.id] > 0 ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center" }}>−</button>
+                <div style={{ width: 20, textAlign: "center", fontSize: 14, fontWeight: 700, lineHeight: "26px" }}>{skills[sd.id]}</div>
+                <button onClick={() => addSkill(sd.id)}
+                  style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)",
+                    background: remaining > 0 && skills[sd.id] < 5 ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.02)",
+                    color: remaining > 0 && skills[sd.id] < 5 ? "#fff" : "rgba(255,255,255,0.2)", fontSize: 16, fontWeight: 700,
+                    cursor: remaining > 0 && skills[sd.id] < 5 ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center" }}>+</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ textAlign: "center", marginTop: 12 }}>
+        <button onClick={() => onDone({ position, primaryColor, secondaryColor, skills })}
+          style={{ padding: "12px 48px", background: "linear-gradient(135deg, #2563eb, #1d4ed8)",
+            border: "none", borderRadius: 10, color: "#fff", fontSize: 16, fontWeight: 800,
+            cursor: "pointer", letterSpacing: 2, boxShadow: "0 4px 30px rgba(37,99,235,0.35)" }}>
+          NÆSTE: SÆT DIT HOLD →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ======================== SET YOUR TEAM SCREEN ========================
+
+const FORMATION_SLOTS = [
+  { id: "gk", label: "Målmand", x: 50, y: 88 },
+  { id: "lb", label: "Forsvar", x: 28, y: 70 },
+  { id: "rb", label: "Forsvar", x: 72, y: 70 },
+  { id: "lm", label: "Midtbane", x: 25, y: 48 },
+  { id: "rm", label: "Midtbane", x: 75, y: 48 },
+  { id: "ls", label: "Angriber", x: 35, y: 26 },
+  { id: "rs", label: "Angriber", x: 65, y: 26 },
+];
+
+const FAMILY_MEMBERS = [
+  { name: "Edgar", hair: "#b8943a", hairStyle: "curly", defaultNum: 10 },
+  { name: "Herbert", hair: "#5c3317", hairStyle: "short", defaultNum: 7 },
+  { name: "Bernhard", hair: "#daa520", hairStyle: "straight", defaultNum: 8 },
+  { name: "Thomas", hair: "#5c3317", hairStyle: "short", defaultNum: 4 },
+  { name: "Benjamin", hair: "#5c3317", hairStyle: "short", defaultNum: 6 },
+  { name: "Sosha", hair: "#5c3317", hairStyle: "long", defaultNum: 9 },
+  { name: "Joshua", hair: "#5c3317", hairStyle: "short", defaultNum: 1 },
+];
+
+function SetTeamScreen({ playerConfig, onDone }) {
+  const [assignments, setAssignments] = useState(() => {
+    const def = {};
+    def["gk"] = "Joshua";
+    def["lb"] = "Thomas";
+    def["rb"] = "Benjamin";
+    def["lm"] = "Bernhard";
+    def["rm"] = "Herbert";
+    def["ls"] = "Sosha";
+    def["rs"] = "Edgar";
+    return def;
+  });
+  const [selected, setSelected] = useState(null);
+
+  const handleSlotClick = (slotId) => {
+    if (selected === null) {
+      setSelected(slotId);
+    } else if (selected === slotId) {
+      setSelected(null);
+    } else {
+      setAssignments(a => {
+        const n = { ...a };
+        const temp = n[selected];
+        n[selected] = n[slotId];
+        n[slotId] = temp;
+        return n;
+      });
+      setSelected(null);
+    }
+  };
+
+  const buildTeam = () => {
+    const roleMap = { "gk": "Målmand", "lb": "Forsvar", "rb": "Forsvar", "lm": "Midtbane", "rm": "Midtbane", "ls": "Angriber", "rs": "Angriber" };
+    const team = FORMATION_SLOTS.map(slot => {
+      const name = assignments[slot.id];
+      const member = FAMILY_MEMBERS.find(f => f.name === name);
+      return {
+        name: member.name, role: roleMap[slot.id], num: member.defaultNum,
+        hair: member.hair, hairStyle: member.hairStyle,
+      };
+    });
+    onDone(team);
+  };
+
+  return (
+    <div style={{ width: "100%", maxWidth: 800, margin: "0 auto", aspectRatio: "800/600",
+      background: "linear-gradient(180deg, #020210 0%, #0a1040 100%)",
+      borderRadius: 10, display: "flex", flexDirection: "column",
+      padding: "20px 24px", boxSizing: "border-box", overflow: "auto",
+      boxShadow: "0 0 60px rgba(37,99,235,0.25)", fontFamily: "'Segoe UI', Arial, sans-serif", color: "#fff" }}>
+
+      <div style={{ textAlign: "center", marginBottom: 12 }}>
+        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", letterSpacing: 5, textTransform: "uppercase" }}>FC Kongehuset</div>
+        <h2 style={{ fontSize: 24, fontWeight: 900, margin: "2px 0" }}>SÆT DIT HOLD</h2>
+        <div style={{ width: 60, height: 2, background: "linear-gradient(90deg, transparent, #2563eb, transparent)", margin: "6px auto" }} />
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 4 }}>
+          Klik på to spillere for at bytte deres pladser
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 20, flex: 1, minHeight: 0 }}>
+        {/* Field with formation */}
+        <div style={{ flex: 1, background: "linear-gradient(180deg, #176834, #1d7a3e, #25924a)", borderRadius: 12,
+          position: "relative", border: "2px solid rgba(255,255,255,0.08)", minHeight: 340 }}>
+          {/* Field markings */}
+          <div style={{ position: "absolute", left: "10%", right: "10%", top: "8%", bottom: "4%",
+            border: "1px solid rgba(255,255,255,0.12)", borderRadius: 2 }} />
+          {/* Center circle */}
+          <div style={{ position: "absolute", left: "50%", top: "50%", width: 60, height: 60,
+            border: "1px solid rgba(255,255,255,0.1)", borderRadius: "50%", transform: "translate(-50%, -50%)" }} />
+          {/* Penalty area */}
+          <div style={{ position: "absolute", left: "25%", right: "25%", bottom: "4%", height: "18%",
+            border: "1px solid rgba(255,255,255,0.1)", borderRadius: 2 }} />
+          {/* Goal */}
+          <div style={{ position: "absolute", left: "38%", right: "38%", bottom: "4%", height: "4%",
+            border: "1.5px solid rgba(255,255,255,0.2)", borderTop: "none", borderRadius: "0 0 2px 2px" }} />
+
+          {/* Player slots */}
+          {FORMATION_SLOTS.map(slot => {
+            const name = assignments[slot.id];
+            const member = FAMILY_MEMBERS.find(f => f.name === name);
+            const isSel = selected === slot.id;
+            const teamCol = playerConfig ? playerConfig.primaryColor : "#2563eb";
+            const secCol = playerConfig ? playerConfig.secondaryColor : "#ffffff";
+            const isKeeper = slot.id === "gk";
+            return (
+              <div key={slot.id} onClick={() => handleSlotClick(slot.id)}
+                style={{ position: "absolute", left: `${slot.x}%`, top: `${slot.y}%`, transform: isSel ? "translate(-50%, -50%) scale(1.15)" : "translate(-50%, -50%)",
+                  cursor: "pointer", textAlign: "center", zIndex: isSel ? 10 : 1, transition: "transform 0.2s" }}>
+                <div style={{ width: 42, height: 42, borderRadius: "50%",
+                  background: isKeeper ? "linear-gradient(135deg, #22c55e, #16a34a)" : `linear-gradient(135deg, ${teamCol}, ${shadeColor(teamCol, -25)})`,
+                  border: isSel ? "2.5px solid #facc15" : "2px solid rgba(255,255,255,0.2)",
+                  boxShadow: isSel ? "0 0 20px rgba(250,204,21,0.5), 0 0 40px rgba(250,204,21,0.2)" : "0 2px 8px rgba(0,0,0,0.4)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 14, fontWeight: 800, color: isKeeper ? "#000" : secCol,
+                  margin: "0 auto", transition: "all 0.2s" }}>
+                  {member?.defaultNum}
+                </div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#fff", marginTop: 3,
+                  textShadow: "0 1px 4px rgba(0,0,0,0.8)" }}>{name}</div>
+                <div style={{ fontSize: 8, color: "rgba(255,255,255,0.45)", textTransform: "uppercase", letterSpacing: 1 }}>{slot.label}</div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Right panel: roster */}
+        <div style={{ flex: "0 0 220px", display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", letterSpacing: 2, textTransform: "uppercase", marginBottom: 4 }}>Spillertrup</div>
+          {FAMILY_MEMBERS.map(member => {
+            const slotId = Object.entries(assignments).find(([k, v]) => v === member.name)?.[0];
+            const slot = FORMATION_SLOTS.find(s => s.id === slotId);
+            const isSelectedPlayer = selected && assignments[selected] === member.name;
+            return (
+              <div key={member.name}
+                style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px",
+                  background: isSelectedPlayer ? "rgba(250,204,21,0.12)" : "rgba(255,255,255,0.03)",
+                  borderRadius: 8, border: isSelectedPlayer ? "1px solid rgba(250,204,21,0.3)" : "1px solid rgba(255,255,255,0.04)",
+                  transition: "all 0.2s" }}>
+                <div style={{ width: 32, height: 32, borderRadius: "50%",
+                  background: slotId === "gk" ? "linear-gradient(135deg, #22c55e, #16a34a)" :
+                    `linear-gradient(135deg, ${playerConfig?.primaryColor || "#2563eb"}, ${shadeColor(playerConfig?.primaryColor || "#2563eb", -25)})`,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 12, fontWeight: 700, color: slotId === "gk" ? "#000" : (playerConfig?.secondaryColor || "#ffffff"),
+                  border: member.name === "Edgar" ? "1.5px solid #facc15" : "1px solid rgba(255,255,255,0.1)" }}>
+                  {member.defaultNum}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700 }}>{member.name}</div>
+                  <div style={{ fontSize: 9, color: "rgba(255,255,255,0.35)" }}>{slot?.label || "—"}</div>
+                </div>
+                {member.name === "Edgar" && <div style={{ fontSize: 9, color: "#facc15", fontWeight: 700 }}>★ KPT</div>}
+              </div>
+            );
+          })}
+          <div style={{ marginTop: 4, padding: "7px 10px", background: "rgba(255,255,255,0.02)", borderRadius: 8,
+            border: "1px solid rgba(255,255,255,0.04)", display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ width: 32, height: 32, borderRadius: "50%", background: "linear-gradient(135deg, #6b7280, #4b5563)",
+              display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>👤</div>
+            <div><div style={{ fontSize: 12, fontWeight: 700 }}>Ela</div><div style={{ fontSize: 9, color: "rgba(255,255,255,0.35)" }}>Træner</div></div>
+          </div>
+          <div style={{ padding: "7px 10px", background: "rgba(255,255,255,0.02)", borderRadius: 8,
+            border: "1px solid rgba(255,255,255,0.04)", display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ width: 32, height: 32, borderRadius: "50%", background: "linear-gradient(135deg, #9ca3af, #6b7280)",
+              display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>🐱</div>
+            <div><div style={{ fontSize: 12, fontWeight: 700 }}>Måvens</div><div style={{ fontSize: 9, color: "rgba(255,255,255,0.35)" }}>Maskot</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ textAlign: "center", marginTop: 12 }}>
+        <button onClick={buildTeam}
+          style={{ padding: "12px 48px", background: "linear-gradient(135deg, #2563eb, #1d4ed8)",
+            border: "none", borderRadius: 10, color: "#fff", fontSize: 16, fontWeight: 800,
+            cursor: "pointer", letterSpacing: 2, boxShadow: "0 4px 30px rgba(37,99,235,0.35)" }}>
+          START TURNERING ⚽
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ======================== MAIN ========================
+
+function EdgarsFodboldudfordring() {
+  const [screen, setScreen] = useState("title");
+  const [mi, setMi] = useState(0);
+  const [results, setResults] = useState([]);
+  const [playerConfig, setPlayerConfig] = useState(null);
+  const [teamConfig, setTeamConfig] = useState(null);
+
+  const handleDesignDone = useCallback((config) => {
+    setPlayerConfig(config);
+    setScreen("setTeam");
+  }, []);
+
+  const handleTeamDone = useCallback((team) => {
+    setTeamConfig(team);
+    // Update the global TEAM colors based on player design
+    if (playerConfig) {
+      TEAM.colors = [playerConfig.primaryColor, playerConfig.secondaryColor];
+    }
+    // Update PLAYERS based on team assignments
+    for (let i = 0; i < team.length && i < PLAYERS.length; i++) {
+      PLAYERS[i].name = team[i].name;
+      PLAYERS[i].role = team[i].role;
+      PLAYERS[i].num = team[i].num;
+      PLAYERS[i].hair = team[i].hair;
+      PLAYERS[i].hairStyle = team[i].hairStyle;
+    }
+    setScreen("bracket");
+  }, [playerConfig]);
+
+  const handleMatchEnd = useCallback((won, ps, os) => {
+    if (won) {
+      setResults(p => { const n = [...p]; n[mi] = { won, playerScore: ps, opponentScore: os }; return n; });
+      if (mi >= OPPONENTS.length - 1) setScreen("victory");
+      else { setMi(p => p + 1); setScreen("bracket"); }
+    } else setScreen("defeat");
+  }, [mi]);
+
+  const handleRestart = useCallback(() => {
+    TEAM.colors = ["#2563eb", "#ffffff"];
+    const origPlayers = [
+      { name: "Edgar", role: "Kaptajn", num: 10, hair: "#b8943a", hairStyle: "curly" },
+      { name: "Herbert", role: "Angriber", num: 7, hair: "#5c3317", hairStyle: "short" },
+      { name: "Bernhard", role: "Midtbane", num: 8, hair: "#daa520", hairStyle: "straight" },
+      { name: "Thomas", role: "Forsvar", num: 4, hair: "#5c3317", hairStyle: "short" },
+      { name: "Benjamin", role: "Midtbane", num: 6, hair: "#5c3317", hairStyle: "short" },
+      { name: "Sosha", role: "Angriber", num: 9, hair: "#5c3317", hairStyle: "long" },
+      { name: "Joshua", role: "Målmand", num: 1, hair: "#5c3317", hairStyle: "short" },
+    ];
+    for (let i = 0; i < origPlayers.length; i++) Object.assign(PLAYERS[i], origPlayers[i]);
+    setScreen("title"); setMi(0); setResults([]); setPlayerConfig(null); setTeamConfig(null);
+  }, []);
+
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#020208", padding: 16 }}>
+      {screen === "title" && <TitleScreen onStart={() => setScreen("designPlayer")} />}
+      {screen === "designPlayer" && <DesignPlayerScreen onDone={handleDesignDone} />}
+      {screen === "setTeam" && <SetTeamScreen playerConfig={playerConfig} onDone={handleTeamDone} />}
+      {screen === "bracket" && <BracketScreen results={results} currentMatch={mi} onStartMatch={(i) => { setMi(i); setScreen("shootout"); }} />}
+      {screen === "shootout" && <ShootoutGame key={`m-${mi}-${Date.now()}`} opponent={OPPONENTS[mi]} onMatchEnd={handleMatchEnd} />}
+      {screen === "victory" && <VictoryScreen onRestart={handleRestart} />}
+      {screen === "defeat" && <DefeatScreen opponentName={OPPONENTS[mi]?.name} onRetry={() => setScreen("shootout")} />}
+    </div>
+  );
+}
+        ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(EdgarsFodboldudfordring));
+    </script>
+</body>
+</html>
